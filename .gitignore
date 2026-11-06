@@ -26,3 +26,6 @@ Thumbs.db
 
 # local test media
 samples/
+
+# local assistant/editor config (contains machine-specific paths)
+.claude/

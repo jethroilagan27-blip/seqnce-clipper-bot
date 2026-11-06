@@ -1,67 +1,138 @@
-# Seqnce – automated short-form video editor (MVP)
+# Seqnce
 
-Upload a talking-head MP4 → local transcription + AI analysis → auto-edited vertical 9:16 short with captions.
-Free/open-source stack: Next.js, FastAPI, SQLite, FFmpeg, faster-whisper, Gemini free tier.
+**Turn a talking-head video into a ready-to-post vertical short, then edit it like you would in a video editor, or just ask for changes in plain words.**
 
-What it does today: upload an MP4 → local Whisper transcript → Gemini picks the best clips → FFmpeg cuts them, crops to 9:16, burns in captions, mixes optional music → preview + download.
+Upload an MP4. Seqnce transcribes it on your computer, asks an AI which parts are worth keeping, and renders a 9:16 short with captions and an optional title, music and chat-driven revisions. You can see the cuts, trim them on a filmstrip timeline, and re-render.
 
-Status: see [PROJECT_STATUS.md](PROJECT_STATUS.md). Design: [ARCHITECTURE.md](ARCHITECTURE.md). API: [docs/API.md](docs/API.md).
+> **Early-stage, self-hosted software.** It runs on your own machine. It has **no login and no usage limits of its own**, so do not expose it to the internet as it is (see [Security](#security-and-privacy)).
 
-## Run it (Windows)
-Two terminals from the repo root:
+## What it does
 
-```bash
-scripts\dev-backend.cmd
+- **Auto-edit:** local speech-to-text ([faster-whisper](https://github.com/SYSTRAN/faster-whisper)) → Gemini chooses the best moments → FFmpeg cuts, shortens long pauses, crops to 9:16 around the speaker, burns in captions, and mixes optional music.
+- **Hook title:** a big coloured headline at the top for the first few seconds (text and colour chosen by the AI, editable).
+- **Tell it what you want:** optional instructions before editing ("focus on the pricing tips, make the hook a question").
+- **Chat revisions:** "cut the intro", "make it 20 seconds". Each change becomes a numbered **version**, with a diff showing which parts were added, removed or trimmed. Go back to any version instantly.
+- **Edit by hand:** a map of your whole video made of real frames, a list of numbered parts, a zoomed filmstrip to trim each one (handles snap to words), transcript click-to-cut, and title/captions controls.
+- **Live preview:** the browser plays your original video as the edit (cuts, crop, captions, title) before anything is rendered. The preview uses the same cut list as the renderer.
+- **Live progress:** while it works you watch the transcript appear, then the AI's chosen parts, and can play the preview before the final render finishes.
+
+## How it works
+
 ```
-```bash
-scripts\dev-frontend.cmd
-```
-Open http://localhost:3000. Backend docs: http://127.0.0.1:8000/docs.
-
-## First-time setup
-Already done on this machine. On a fresh one:
-1. Install Python 3.12 (or `tools/uv/uv.exe python install 3.12`) and FFmpeg (put `ffmpeg.exe`/`ffprobe.exe` in `tools/ffmpeg/` or on PATH).
-2. `cd backend && ..\tools\uv\uv.exe sync`
-3. `cd frontend && npm install`
-4. Copy `.env.example` → `.env`.
-
-## Tests
-```bash
-cd backend && ..\tools\uv\uv.exe run pytest -q
+upload ─► prepare ─► transcribe ─► look at frames ─► AI plan ─► validate ─► FFmpeg render ─► result
+          ffprobe    Whisper        FFmpeg + Gemini   Gemini     Python     libx264 + libass
 ```
 
-## Environment variables (root `.env`)
+The AI only ever returns JSON. Python validates and repairs it (clamping, snapping to sentence boundaries, merging overlaps, length limits) and builds the FFmpeg commands itself. Nothing the AI writes is executed. See [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/API.md](docs/API.md).
+
+Stack: Next.js (React, Tailwind) · FastAPI · SQLite · FFmpeg · faster-whisper · Google Gemini.
+
+## Requirements
+
+- **Python 3.12+** and [uv](https://docs.astral.sh/uv/) (or any way to install the backend dependencies)
+- **Node.js 20.9+**
+- **FFmpeg + ffprobe**, built with libx264 and libass (most full builds have both). FFmpeg is not bundled; install it yourself and put it on your `PATH`, or drop `ffmpeg` and `ffprobe` into `tools/ffmpeg/`.
+- A **Gemini API key** (free at <https://aistudio.google.com/apikey>). Without one the app still works, but falls back to a basic cut with no AI choices, hook or chat edits.
+- Disk space and patience: the first run downloads the Whisper `small` model (about 0.5 GB). On a CPU, transcription takes roughly twice the video length.
+
+## Quick start
+
+```bash
+git clone https://github.com/jethroilagan27-blip/seqnce-clipper-bot.git
+cd seqnce-clipper-bot
+cp .env.example .env          # then put your GEMINI_API_KEY in .env
+```
+
+Backend (terminal 1):
+
+```bash
+cd backend
+uv sync
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Frontend (terminal 2):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open <http://localhost:3000>. API docs are at <http://127.0.0.1:8000/docs>.
+
+On Windows, `scripts\dev-backend.cmd` and `scripts\dev-frontend.cmd` do the same thing once the dependencies are installed.
+
+Check that your key and model work:
+
+```bash
+cd backend && uv run python check_gemini.py
+```
+
+## Configuration
+
+Everything is optional except the key. Put these in the repo-root `.env` (see [.env.example](.env.example)).
+
 | Variable | Default | Meaning |
 |---|---|---|
-| `STORAGE_DIR` | `./storage` | uploads / temp / subtitles / outputs / music + SQLite db |
-| `FFMPEG_PATH`, `FFPROBE_PATH` | auto | override tool locations |
-| `MAX_UPLOAD_MB` | 500 | upload size cap |
-| `MAX_VIDEO_DURATION_S` | 1800 | longest accepted video |
-| `RETENTION_DAYS` | 7 | finished jobs older than this are deleted at startup (0 = keep) |
-| `CORS_ORIGINS` | localhost:3000 | allowed browser origins |
-| `GEMINI_API_KEY` | – | keep only in `.env`. Without it, visual analysis falls back to a neutral centre crop |
-| `GEMINI_MODEL` | gemini-3.5-flash | run `check_gemini.py` to list the models your key can use |
-| `WHISPER_MODEL` | small | tiny / base / small / medium (bigger = slower, more accurate) |
-| `WHISPER_DEVICE`, `WHISPER_COMPUTE_TYPE` | cpu, int8 | GPU (`cuda`, `float16`) needs extra CUDA libraries |
-| `WHISPER_LANGUAGE` | auto | force e.g. `en` or `tl` if auto-detect struggles |
-| `FRAME_INTERVAL_S`, `FRAME_WIDTH` | 3, 512 | frame sampling for visual analysis |
-| `MAX_AI_FRAMES` | 12 | max images per AI call |
-| `SCENE_THRESHOLD`, `AI_MAX_RETRIES` | 0.35, 3 | scene-cut sensitivity; retries on rate limits |
+| `GEMINI_API_KEY` | – | Your key. Keep it only in `.env` (git-ignored). |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Run `check_gemini.py` to list models your key can use. If you hit rate limits, try a `-lite` model. |
+| `WHISPER_MODEL` | `small` | `tiny` / `base` / `small` / `medium` (bigger = slower, more accurate) |
+| `WHISPER_LANGUAGE` | auto | Force e.g. `en` or `tl` if auto-detect struggles |
+| `WHISPER_DEVICE`, `WHISPER_COMPUTE_TYPE` | `cpu`, `int8` | GPU (`cuda`, `float16`) needs extra CUDA libraries |
+| `MAX_UPLOAD_MB`, `MAX_VIDEO_DURATION_S` | 500, 1800 | Upload size and length caps |
+| `RETENTION_DAYS` | 7 | Finished jobs older than this are deleted at startup (0 = keep) |
+| `STORAGE_DIR` | `./storage` | Uploads, renders, temp files and the SQLite database |
+| `CORS_ORIGINS` | localhost:3000 | Browser origins allowed to call the API |
+| `FFMPEG_PATH`, `FFPROBE_PATH` | auto | Override tool locations |
 
-### Useful commands
+Frontend (`frontend/.env.local`): `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`) and `NEXT_PUBLIC_MAX_UPLOAD_MB`.
+
+**Background music:** put `.mp3`/`.wav`/`.m4a` files **you have the rights to use** into `storage/music/`, then tick "Background music". No music is bundled.
+
+## Costs and limits
+
+- Seqnce itself is free. Transcription, frame extraction, editing and rendering all run locally with no per-video fee.
+- The AI step uses the **Gemini API**. On the free tier you get a limited number of requests per minute and per day (shown in Google AI Studio). Each upload uses 2 AI calls and each chat message uses 1; hand edits, restoring a version and the live preview use none. If you hit the limit the app falls back to a basic cut and tells you why.
+
+## Security and privacy
+
+- **What leaves your machine:** the transcript text, up to 12 small (512 px) frames sampled from the video, and any instructions or chat messages you type are sent to the Gemini API. Your video file and audio stay local. Read Google's current terms for the free tier; they differ from the paid tier.
+- **No authentication, no per-user quotas.** Anyone who can reach the backend can upload videos and spend your Gemini quota. Run it on localhost or a private network. If you want to put it on the internet, put an authenticating proxy in front of it (for example Cloudflare Access or a VPN) and add upload limits first.
+- The code takes care to avoid the usual footguns: no shell execution (FFmpeg is always called with an argument list), no client-supplied paths, server-generated filenames, MP4 signature and ffprobe validation, size and duration caps, and secrets only in the untracked `.env`.
+- Only upload footage you have the right to edit and share.
+
+## Known limitations
+
+- Talking-head footage works best; there is no face tracking (the 9:16 crop is centred on where the AI says the speaker is).
+- Clips stay in chronological order (no re-ordering). Captions are plain pages, not animated word-by-word.
+- 720p sources look soft after the vertical crop; 1080p and up look better.
+- Tested on synthetic samples and a few real vlogs. Accents, noisy audio and very long videos are not well tested.
+- One job renders at a time.
+
+## Tests
+
 ```bash
-cd backend && ..\tools\uv\uv.exe run python check_gemini.py
+cd backend && uv run pytest -q     # 115 tests, no network or real models needed
+cd frontend && npm test            # timeline helper unit tests
+cd frontend && npm run lint && npx tsc --noEmit
 ```
-```bash
-cd backend && ..\tools\uv\uv.exe run pytest -m real_whisper -s
+
+Opt-in checks that use the real Whisper model and the real Gemini API: `uv run pytest -m real_whisper -s` and `uv run pytest -m live_ai -s` (create `samples/speech_sample.mp4` first with `scripts/make_sample_video.ps1` on Windows).
+
+## Project layout
+
 ```
-`check_gemini.py` verifies your key and model. The second runs real transcription on `samples/speech_sample.mp4` (create it with `powershell scripts\make_sample_video.ps1`).
+backend/    FastAPI app: pipeline stages, AI layer, plan validation, FFmpeg editing, tests
+frontend/   Next.js UI: upload, live processing view, editor, chat, versions
+docs/       API reference
+scripts/    Windows launchers and a sample-video generator
+```
 
-Frontend (`frontend/.env.local`): `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`), `NEXT_PUBLIC_MAX_UPLOAD_MB`.
+## Contributing
 
-## Background music
-Put `.mp3` / `.wav` / `.m4a` files **you have the rights to use** into `storage/music/`, then tick "Background music" in the app and pick a track. It is mixed ~18 dB under the voice. No music is bundled.
+Issues and pull requests are welcome. Please run the tests above before opening a PR, and keep the rule that AI output is only ever data (validated JSON), never code or shell.
 
-## Security notes
-No shell execution, no client-supplied paths, server-generated filenames, validated uploads, secrets only in untracked `.env`.
-Background music: only supply music you have rights to use; none is bundled.
+## License
+
+[MIT](LICENSE) © 2026 Jethro Ilagan. FFmpeg, faster-whisper and the other dependencies have their own licenses; FFmpeg is installed separately and is not distributed with this repository.
