@@ -92,3 +92,59 @@ def test_no_speech_fails_clearly(client: TestClient, sample_video: Path, monkeyp
     job = _wait_done(client, _upload(client, sample_video).json()["job_id"])
     assert job["status"] == "failed"
     assert "no speech" in job["error"].lower()
+
+
+# ---------- live transcript while Whisper is still working ----------
+
+class _SlowWhisper:
+    """Yields three segments, pausing between them so a client can look in the middle."""
+
+    def __init__(self, gate_after_first, release):
+        self.gate_after_first, self.release = gate_after_first, release
+
+    def transcribe(self, audio, **kwargs):
+        from types import SimpleNamespace as NS
+
+        def gen():
+            for i, text in enumerate([" One.", " Two.", " Three."]):
+                if i == 1:
+                    self.gate_after_first.set()  # first segment has been produced and saved
+                    assert self.release.wait(20)  # hold here until the test has looked
+                w = [NS(start=i, end=i + 0.9, word=text)]
+                yield NS(start=float(i), end=i + 1.0, text=text, words=w)
+
+        return gen(), NS(language="en", language_probability=0.9, duration=3.0)
+
+
+def test_transcript_is_available_while_transcribing(client: TestClient, sample_video: Path, monkeypatch):
+    import threading
+
+    first_done, release = threading.Event(), threading.Event()
+    monkeypatch.setattr("app.pipeline.transcribe._get_model", lambda: _SlowWhisper(first_done, release))
+    monkeypatch.setattr("app.pipeline.transcribe.PARTIAL_EVERY_S", 0.0)
+    job_id = _upload(client, sample_video).json()["job_id"]
+    try:
+        assert first_done.wait(20), "transcription never started"
+        mid = client.get(f"/api/jobs/{job_id}/analysis")
+        assert mid.status_code == 200
+        body = mid.json()
+        assert body["partial"] is True and body["visual"] is None and body["plan"] is None
+        assert [s["text"] for s in body["transcript"]["segments"]] == ["One."]
+        assert body["transcript"]["language"] == "en" and body["transcript"]["duration"] == 3.0
+        assert body["transcript"]["complete"] is False
+        assert str(get_settings().storage_dir) not in json.dumps(body)
+    finally:
+        release.set()
+
+    assert _wait_done(client, job_id)["status"] == "completed"
+    final = client.get(f"/api/jobs/{job_id}/analysis").json()
+    assert final["partial"] is False and [s["text"] for s in final["transcript"]["segments"]] == ["One.", "Two.", "Three."]
+
+
+def test_no_partial_transcript_before_transcription_starts(client: TestClient, sample_video: Path):
+    from app import db
+    job_id = _upload(client, sample_video).json()["job_id"]
+    _wait_done(client, job_id)
+    db.update_job(job_id, status="running", stage="preparing", transcript_path=None)
+    (get_settings().temp_dir / job_id / "transcript.partial.json").unlink(missing_ok=True)
+    assert client.get(f"/api/jobs/{job_id}/analysis").status_code == 409

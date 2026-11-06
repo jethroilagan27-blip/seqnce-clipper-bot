@@ -146,3 +146,32 @@ export function formatTime(t: number): string {
   const m = Math.floor(s / 60);
   return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`;
 }
+
+export const PURPOSE_LABEL: Record<DraftClip["purpose"], string> = {
+  hook: "Opening hook",
+  main_content: "Main point",
+  example: "Example",
+  conclusion: "Closing",
+};
+
+/** Tick spacing (seconds) for a ruler covering `windowLen` seconds with roughly 4-6 labels. */
+export function niceStep(windowLen: number): number {
+  const steps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120];
+  return steps.find((s) => windowLen / s <= 6) ?? 300;
+}
+
+/** What is said inside a range, as one line of text (cut to `max` characters). */
+export function snippetFor(segments: { start: number; end: number; text: string }[], r: Range, max = 110): string {
+  const text = segments
+    .filter((s) => (s.start + s.end) / 2 >= r.start && (s.start + s.end) / 2 <= r.end)
+    .map((s) => s.text.trim())
+    .join(" ");
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+}
+
+/** The part of the video (plus some context) a zoomed trim bar should show for one clip. */
+export function contextWindow(clip: Range, duration: number): Range {
+  const len = clip.end - clip.start;
+  const pad = Math.min(30, Math.max(6, len * 0.35));
+  return { start: Math.max(0, clip.start - pad), end: Math.min(duration, clip.end + pad) };
+}

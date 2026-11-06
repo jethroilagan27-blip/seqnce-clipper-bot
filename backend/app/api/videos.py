@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import uuid
 from pathlib import Path as FsPath
 
@@ -23,6 +24,9 @@ router = APIRouter(prefix="/api/videos", tags=["videos"])
 
 CHUNK = 1024 * 1024
 ALLOWED_SUFFIXES = {".mp4"}
+
+THUMB_HEIGHTS = (48, 64, 96, 144)  # the only sizes the filmstrip asks for
+_thumb_slots = threading.BoundedSemaphore(3)  # never let a filmstrip hog the CPU while a render runs
 
 
 def _display_name(raw: str | None) -> str:
@@ -158,3 +162,51 @@ def original_video(job_id: str = JOB_ID) -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="The original video file is missing")
     return FileResponse(path, media_type="video/mp4")
+
+
+@router.get("/{job_id}/thumb")
+def thumbnail(
+    job_id: str = JOB_ID,
+    t: float = Query(..., ge=0, le=1_000_000, description="Seconds into the original video"),
+    h: int = Query(64, description="Height in pixels: one of 48, 64, 96, 144"),
+) -> FileResponse:
+    """One small JPEG frame of the original video (for the CapCut-style filmstrips).
+
+    Frames are cut on a half-second grid, made on first request with FFmpeg and cached on disk
+    (and by the browser), so scrolling around a timeline only ever extracts each frame once.
+    """
+    job = get_job_or_404(job_id)
+    if h not in THUMB_HEIGHTS:
+        raise HTTPException(status_code=422, detail=f"h must be one of {list(THUMB_HEIGHTS)}")
+    src = FsPath(job["upload_path"])
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="The original video file is missing")
+
+    duration = float((job.get("metadata_json") or {}).get("duration") or 0)
+    slot = int(min(t, max(duration - 0.3, 0.0)) * 2)  # half-second grid, always a bit before the end
+    out_dir = get_settings().temp_dir / job_id / "thumbs"
+    path = out_dir / f"{h}_{slot:07d}.jpg"
+    headers = {"Cache-Control": "public, max-age=86400"}  # a frame of a given job never changes
+    if path.is_file():
+        return FileResponse(path, media_type="image/jpeg", headers=headers)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".part.jpg")
+    with _thumb_slots:
+        if not path.is_file():  # another request may have made it while we waited
+            proc = media.run_tool(
+                [
+                    get_settings().ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                    "-ss", f"{slot / 2:.1f}", "-i", str(src),
+                    "-frames:v", "1", "-an",
+                    "-vf", f"scale=-2:{h},format=yuvj420p", "-q:v", "6",  # yuvj = full range, what JPEG expects
+                    str(tmp),
+                ],
+                timeout=60,
+            )
+            if proc.returncode != 0 or not tmp.is_file() or tmp.stat().st_size < 200:
+                tmp.unlink(missing_ok=True)
+                log.warning("job %s: thumbnail at %.1fs failed: %s", job_id, slot / 2, proc.stderr.strip()[:200])
+                raise HTTPException(status_code=404, detail="No frame at that time")
+            tmp.replace(path)
+    return FileResponse(path, media_type="image/jpeg", headers=headers)

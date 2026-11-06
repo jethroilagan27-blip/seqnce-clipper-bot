@@ -110,3 +110,32 @@ def test_unknown_and_malformed_job_ids(client: TestClient):
     assert client.get("/api/jobs/" + "0" * 32).status_code == 404
     assert client.get("/api/jobs/..%2F..%2Fetc").status_code in (404, 422)
     assert client.get("/api/jobs/not-a-valid-id").status_code == 422
+
+
+# ---------- filmstrip thumbnails ----------
+
+def test_thumbnail_is_a_cached_jpeg(client: TestClient, sample_video: Path):
+    job_id = _upload(client, sample_video).json()["job_id"]
+    r = client.get(f"/api/videos/{job_id}/thumb", params={"t": 1.2, "h": 64})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert r.content[:3] == b"\xff\xd8\xff" and len(r.content) > 300
+    assert "max-age" in r.headers["cache-control"]
+
+    cached = list((get_settings().temp_dir / job_id / "thumbs").glob("64_*.jpg"))
+    assert len(cached) == 1
+    before = cached[0].stat().st_mtime_ns
+    assert client.get(f"/api/videos/{job_id}/thumb", params={"t": 1.3, "h": 64}).status_code == 200  # same half-second slot
+    assert cached[0].stat().st_mtime_ns == before and len(list(cached[0].parent.iterdir())) == 1  # nothing re-made
+
+
+def test_thumbnail_past_the_end_uses_the_last_frame_and_bad_input_is_rejected(client: TestClient, sample_video: Path):
+    job_id = _upload(client, sample_video).json()["job_id"]
+    assert client.get(f"/api/videos/{job_id}/thumb", params={"t": 500, "h": 48}).status_code == 200
+    assert client.get(f"/api/videos/{job_id}/thumb", params={"t": 1, "h": 77}).status_code == 422  # unsupported size
+    assert client.get(f"/api/videos/{job_id}/thumb", params={"t": -1, "h": 64}).status_code == 422
+    assert client.get(f"/api/videos/{job_id}/thumb", params={"t": "nan", "h": 64}).status_code == 422
+    assert client.get(f"/api/videos/{job_id}/thumb", params={"h": 64}).status_code == 422
+    assert client.get(f"/api/videos/{'0' * 32}/thumb", params={"t": 1, "h": 64}).status_code == 404
+    assert client.get("/api/videos/../../x/thumb", params={"t": 1}).status_code in (404, 422)
+    names = [p.name for p in (get_settings().temp_dir / job_id / "thumbs").iterdir()]
+    assert all(n.startswith("48_") or n.startswith("64_") for n in names)  # only server-made names on disk

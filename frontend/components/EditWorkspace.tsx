@@ -12,10 +12,11 @@ import {
   type TimelineSpec,
   type Version,
 } from "@/lib/api";
-import { clipsEqual, toggleRange, type DraftClip, type Range } from "@/lib/timeline";
+import { clipsEqual, formatTime, toggleRange, type DraftClip, type Range } from "@/lib/timeline";
 import { ChangeChips } from "./RevisionPanel";
 import LivePreview, { type PreviewHandle } from "./LivePreview";
-import Timeline from "./Timeline";
+import Overview from "./Overview";
+import PartsPanel from "./PartsPanel";
 import TranscriptEditor from "./TranscriptEditor";
 
 type Draft = {
@@ -77,6 +78,8 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
   const [playhead, setPlayhead] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
+  const [tab, setTab] = useState<"parts" | "transcript" | "title">("parts");
+  const [selected, setSelected] = useState<number | null>(null);
 
   const edit = editFrom(plan, draft);
   const editKey = JSON.stringify(edit);
@@ -117,8 +120,10 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
     [segments],
   );
   const duration = spec?.source.duration ?? analysis?.transcript.duration ?? plan.clips.at(-1)?.end ?? 1;
+  const aspect = spec ? spec.source.width / spec.source.height : 16 / 9;
 
   function change(patch: Partial<Draft>) {
+    if (patch.clips && patch.clips.length !== draft.clips.length) setSelected(null); // part numbers shifted
     setDraft((d) => ({ ...d, ...patch }));
     setMode("preview");
     setError(null);
@@ -130,8 +135,6 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
 
   const changed = shown.changes?.clips ?? [];
   const removed: Range[] = changed.filter((c) => c.status === "removed");
-  const statusFor = (c: DraftClip) =>
-    changed.find((x) => x.status !== "removed" && x.status !== "kept" && x.start === c.start && x.end === c.end)?.status;
 
   async function run(fn: () => Promise<string | null>) {
     setWorking(true);
@@ -141,10 +144,21 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
     if (err) setError(err);
   }
 
+  const changedAreas = [
+    edit.clips && "parts",
+    (edit.hook_enabled !== undefined ||
+      edit.hook_text !== undefined ||
+      edit.hook_color !== undefined ||
+      edit.hook_duration_s !== undefined) &&
+      "title",
+    edit.captions_enabled !== undefined && "captions",
+  ].filter(Boolean) as string[];
+
   const locked = !editable || working;
   const hookInvalid = draft.hookEnabled && !draft.hookText.trim();
   const canApply = dirty && !locked && !specError && !hookInvalid;
   const finalSrc = shown.preview_url ? `${API_URL}${shown.preview_url}` : null;
+  const kept = draft.clips.reduce((a, c) => a + (c.end - c.start), 0);
 
   return (
     <div className="space-y-6">
@@ -215,12 +229,16 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
         <div className="space-y-6">{side}</div>
       </div>
 
-      <section className="space-y-5 rounded-2xl border border-white/10 p-4 sm:p-5">
+      <section className="space-y-4 rounded-2xl border border-white/10 p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="font-medium">
-              Timeline <span className="text-xs font-normal text-white/40">version {shown.version}</span>
+              Edit your short <span className="text-xs font-normal text-white/40">version {shown.version}</span>
             </h2>
+            <p className="text-xs text-white/50">
+              {draft.clips.length} part{draft.clips.length === 1 ? "" : "s"} · {formatTime(kept).replace(/\.\d$/, "")} taken from
+              your {formatTime(duration).replace(/\.\d$/, "")} video
+            </p>
             <ChangeChips changes={shown.changes} />
           </div>
           <span
@@ -232,18 +250,23 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
           </span>
         </div>
 
-        <Timeline
+        <Overview
+          jobId={jobId}
           duration={duration}
+          aspect={aspect}
           clips={draft.clips}
-          segments={segments}
-          boundaries={boundaries}
+          ghosts={dirty ? [] : removed}
+          selected={selected}
           playheadSrc={playhead}
-          editable={editable}
-          removed={dirty ? [] : removed}
-          statusFor={dirty ? undefined : statusFor}
-          onChange={(clips) => change({ clips })}
+          onSelect={(i) => {
+            setTab("parts");
+            setSelected(i);
+          }}
           onSeek={seek}
         />
+        <p className="-mt-2 text-xs text-white/40">
+          Bright parts of your video are in the short; dimmed parts are cut out. Numbers match the list below.
+        </p>
 
         {specError && (
           <p role="alert" className="text-xs text-red-300">
@@ -251,9 +274,52 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
           </p>
         )}
 
-        <div className="grid gap-6 md:grid-cols-2">
+        <div role="tablist" aria-label="Editing tools" className="flex gap-1 border-b border-white/10">
+          {(
+            [
+              ["parts", "Parts"],
+              ["transcript", "Transcript"],
+              ["title", "Title & captions"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => setTab(key)}
+              className={`-mb-px border-b-2 px-3 py-2 text-sm ${
+                tab === key ? "border-violet-400 font-medium text-white" : "border-transparent text-white/50 hover:text-white"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "parts" && (
+          <PartsPanel
+            jobId={jobId}
+            aspect={aspect}
+            duration={duration}
+            clips={draft.clips}
+            segments={segments}
+            boundaries={boundaries}
+            selected={selected}
+            playheadSrc={playhead}
+            editable={editable}
+            onSelect={setSelected}
+            onChange={(clips) => change({ clips })}
+            onSeek={seek}
+          />
+        )}
+
+        {tab === "transcript" && (
           <div className="space-y-2">
-            <p className="text-sm font-medium">Transcript <span className="text-xs font-normal text-white/40">click a sentence to cut it or add it back</span></p>
+            <p className="text-sm text-white/60">
+              Everything that was said.{" "}
+              {editable ? "Click a sentence to cut it out of your short, or to add it back." : ""} Highlighted sentences are in
+              your short.
+            </p>
             <TranscriptEditor
               segments={segments}
               clips={draft.clips}
@@ -263,11 +329,16 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
               onSeek={seek}
             />
           </div>
+        )}
 
+        {tab === "title" && (
           <div className="space-y-4 text-sm">
             <div className="space-y-2">
               <label className="flex items-center justify-between gap-3">
-                <span className="font-medium">Hook title</span>
+                <span>
+                  <span className="font-medium">Title at the top</span>
+                  <span className="block text-xs text-white/50">A big headline that shows for the first few seconds</span>
+                </span>
                 <input
                   type="checkbox"
                   className="h-5 w-5 accent-violet-500"
@@ -285,7 +356,7 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
                     disabled={locked}
                     onChange={(e) => change({ hookText: e.target.value })}
                     aria-label="Hook title text"
-                    placeholder="Type a hook (max 8 words)"
+                    placeholder="Type a title (max 8 words)"
                     className="w-full rounded-md border border-white/10 bg-[#15151c] px-3 py-2 text-sm font-semibold uppercase focus:border-violet-400 focus:outline-none"
                     style={{ color: HOOK_CSS[draft.hookColor] ?? "#ffe600" }}
                   />
@@ -322,9 +393,11 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
                 </>
               )}
             </div>
-
             <label className="flex items-center justify-between gap-3">
-              <span className="font-medium">Captions</span>
+              <span>
+                <span className="font-medium">Captions</span>
+                <span className="block text-xs text-white/50">Subtitles burned into the video</span>
+              </span>
               <input
                 type="checkbox"
                 className="h-5 w-5 accent-violet-500"
@@ -333,48 +406,69 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
                 onChange={(e) => change({ captions: e.target.checked })}
               />
             </label>
+          </div>
+        )}
 
-            {isCurrent ? (
-              <div className="space-y-2 border-t border-white/10 pt-4">
-                <button
-                  disabled={!canApply}
-                  onClick={() => run(() => onApply(edit))}
-                  className="w-full rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold hover:bg-violet-500 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/30"
-                >
-                  {working ? "Applying…" : dirty ? "Apply changes (renders a new version)" : "No changes yet"}
-                </button>
+        {plan.warnings.length > 0 && <p className="text-xs text-white/40">Notes: {plan.warnings.join(" · ")}</p>}
+
+        <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/15 bg-[#14141b]/95 px-4 py-3 shadow-xl backdrop-blur">
+          {isCurrent ? (
+            <>
+              <p className="min-w-0 text-sm">
+                {dirty ? (
+                  <>
+                    <span className="font-medium">Unsaved changes</span>
+                    <span className="text-white/50"> · {changedAreas.join(", ")}</span>
+                  </>
+                ) : (
+                  <span className="text-white/50">Make a change above, then apply it to get a new version.</span>
+                )}
+                {error && (
+                  <span role="alert" className="block text-xs text-red-300">
+                    {error}
+                  </span>
+                )}
+              </p>
+              <div className="flex gap-2">
                 {dirty && (
                   <button
                     disabled={working}
                     onClick={() => {
                       setDraft(draftFrom(plan));
+                      setSelected(null);
                       setError(null);
                     }}
-                    className="w-full rounded-xl border border-white/15 px-4 py-2 text-xs text-white/70 hover:bg-white/5"
+                    className="rounded-lg border border-white/15 px-3 py-2 text-sm text-white/70 hover:bg-white/5"
                   >
-                    Discard my changes
+                    Discard
                   </button>
                 )}
-              </div>
-            ) : (
-              <div className="border-t border-white/10 pt-4">
                 <button
-                  disabled={busy || working}
-                  onClick={() => run(() => onRestore(shown.version))}
-                  className="w-full rounded-xl border border-white/20 px-4 py-2.5 text-sm font-medium hover:bg-white/5 disabled:opacity-40"
+                  disabled={!canApply}
+                  onClick={() => run(() => onApply(edit))}
+                  className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold hover:bg-violet-500 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/30"
                 >
-                  {working ? "Restoring…" : `Go back to version ${shown.version}`}
+                  {working ? "Applying…" : "Apply & render"}
                 </button>
               </div>
-            )}
-
-            {error && (
-              <p role="alert" className="text-xs text-red-300">
-                {error}
-              </p>
-            )}
-            {plan.warnings.length > 0 && <p className="text-xs text-white/40">Notes: {plan.warnings.join(" · ")}</p>}
-          </div>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-white/60">You&apos;re looking at an older version (v{shown.version}).</p>
+              <button
+                disabled={busy || working}
+                onClick={() => run(() => onRestore(shown.version))}
+                className="rounded-lg border border-white/20 px-4 py-2 text-sm font-medium hover:bg-white/5 disabled:opacity-40"
+              >
+                {working ? "Restoring…" : `Go back to version ${shown.version}`}
+              </button>
+              {error && (
+                <span role="alert" className="w-full text-xs text-red-300">
+                  {error}
+                </span>
+              )}
+            </>
+          )}
         </div>
       </section>
     </div>

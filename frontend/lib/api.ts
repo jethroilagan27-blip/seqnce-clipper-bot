@@ -141,9 +141,11 @@ export type Analysis = {
   transcript: {
     language: string;
     duration: number;
+    complete?: boolean; // false while Whisper is still working (partial transcript: text only, no words)
     segments: { start: number; end: number; text: string; words?: { start: number; end: number; word: string }[] }[];
   };
   plan?: Plan | null;
+  partial?: boolean; // true while the transcript is still being written
   visual: {
     analysis_source: "ai" | "fallback";
     main_subject: string;
@@ -223,6 +225,12 @@ export const getAnalysis = (id: string) => getJson<Analysis>(`/api/jobs/${id}/an
 export const getResult = (id: string) => getJson<JobResult>(`/api/jobs/${id}/result`);
 export const getVersions = (id: string) => getJson<Versions>(`/api/jobs/${id}/versions`);
 export const originalUrl = (id: string) => `${API_URL}/api/videos/${id}/original`;
+
+/** Heights the server can cut filmstrip frames at (see /api/videos/{id}/thumb). */
+export const THUMB_HEIGHTS = [48, 64, 96, 144] as const;
+/** One small frame of the original video at `t` seconds (cut on a half-second grid, cached by server and browser). */
+export const thumbUrl = (id: string, t: number, h: number) =>
+  `${API_URL}/api/videos/${id}/thumb?t=${Math.max(0, t).toFixed(1)}&h=${THUMB_HEIGHTS.find((x) => x >= h) ?? 144}`;
 
 /** Preview data for the job's plan (or an older `version`), optionally with a draft `edit` applied. Saves nothing. */
 export async function postTimeline(

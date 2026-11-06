@@ -18,3 +18,28 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
+/* Live-edit view: new transcript lines slide in, unfinished things shimmer. */
+@keyframes seqnce-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes seqnce-pop {
+  from { opacity: 0; transform: scaleY(0.4); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes seqnce-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.seqnce-in { animation: seqnce-in 0.35s ease-out both; }
+.seqnce-pop { animation: seqnce-pop 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; transform-origin: bottom; }
+.seqnce-shimmer {
+  background-image: linear-gradient(90deg, transparent 0%, rgba(167, 139, 250, 0.35) 50%, transparent 100%);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: seqnce-shimmer 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .seqnce-in, .seqnce-pop, .seqnce-shimmer { animation: none; }
+}

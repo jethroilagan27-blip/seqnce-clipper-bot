@@ -99,3 +99,11 @@ Body (optional): `{"version": 2, "edit": { …same shape as a hand edit… }}`. 
   "clips": [ … plan clips … ] }
 ```
 Available as soon as the plan exists (`409` before), also while the video is still rendering. `404` unknown version, `422` invalid draft. The browser uses it to play the **original** video as the edit (`GET /api/videos/{id}/original`, Range supported) with the crop, captions and title drawn on top.
+
+## Live view while processing, and filmstrip frames
+
+### GET /api/jobs/{id}/analysis while transcribing
+Once Whisper has produced its first sentence (and until the transcript is final) this returns `200` with `"partial": true`: `transcript` holds the sentences recognised **so far** (text and times only, no per-word timings; `complete: false`, `duration` = length of the whole video), `visual` and `plan` are `null`. The server saves this about every 1.5 s. When the transcript is final the response is the full one with `"partial": false`. Before the first sentence it is still `409`.
+
+### GET /api/videos/{id}/thumb?t=12.5&h=64
+One small JPEG frame of the **original** video, for filmstrips. `t` = seconds (0–1,000,000, clamped to just before the end), `h` ∈ {48, 64, 96, 144} (anything else → `422`). Frames are cut on a half-second grid with FFmpeg on first request (at most 3 at a time), cached on disk under the job's temp folder (removed with the job) and sent with `Cache-Control: max-age=86400`. `404` unknown job, missing file, or no frame at that time.

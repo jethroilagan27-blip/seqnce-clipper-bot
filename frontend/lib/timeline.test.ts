@@ -92,3 +92,29 @@ test("pageAt and rulerStep", () => {
   assert.equal(rulerStep(100), 1); // zoomed in: 1 s labels would be 100 px apart
   assert.equal(rulerStep(2), 60); // zoomed out
 });
+
+import { PURPOSE_LABEL, contextWindow, niceStep, snippetFor } from "./timeline.ts";
+
+test("snippetFor joins the sentences inside a range and truncates", () => {
+  const segs = [
+    { start: 0, end: 4, text: " Hello there." },
+    { start: 5, end: 9, text: "General Kenobi." },
+    { start: 20, end: 24, text: "Elsewhere." },
+  ];
+  assert.equal(snippetFor(segs, { start: 0, end: 10 }), "Hello there. General Kenobi.");
+  assert.equal(snippetFor(segs, { start: 0, end: 10 }, 12), "Hello there…");
+  assert.equal(snippetFor(segs, { start: 12, end: 15 }), "");
+});
+
+test("contextWindow pads the clip and stays inside the video", () => {
+  assert.deepEqual(contextWindow({ start: 100, end: 110 }, 500), { start: 94, end: 116 }); // pad = max(6, 3.5)
+  assert.deepEqual(contextWindow({ start: 2, end: 10 }, 12), { start: 0, end: 12 });
+  const w = contextWindow({ start: 100, end: 400 }, 500); // pad capped at 30 s
+  assert.deepEqual(w, { start: 70, end: 430 });
+});
+
+test("niceStep and labels", () => {
+  assert.equal(niceStep(12), 2);
+  assert.equal(niceStep(300), 60);
+  assert.equal(PURPOSE_LABEL.hook, "Opening hook");
+});

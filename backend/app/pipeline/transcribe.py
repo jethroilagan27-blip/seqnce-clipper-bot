@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +72,34 @@ def transcript_path(job_id: str) -> Path:
     return job_temp_dir(job_id) / "transcript.json"
 
 
+PARTIAL_NAME = "transcript.partial.json"
+PARTIAL_EVERY_S = 1.5  # how often the in-progress transcript is saved for the live view
+
+
+def load_partial(job_id: str) -> dict[str, Any] | None:
+    """The transcript so far (text only), while transcription is still running."""
+    path = get_settings().temp_dir / job_id / PARTIAL_NAME
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _save_partial(job_id: str, info: Any, model_name: str, segments: list[dict[str, Any]]) -> None:
+    """Write atomically so the API never reads a half-written file."""
+    path = job_temp_dir(job_id) / PARTIAL_NAME
+    tmp = path.with_suffix(".tmp")
+    data = {
+        "complete": False,
+        "language": info.language,
+        "duration": round(info.duration, 2),
+        "model": model_name,
+        "segments": [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in segments],
+    }
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
 def load_transcript(job: dict[str, Any]) -> dict[str, Any]:
     path = job.get("transcript_path")
     if not path or not Path(path).is_file():
@@ -103,6 +132,7 @@ def run(job: dict[str, Any]) -> None:
     lo, hi = stages.STAGE_PROGRESS[stages.TRANSCRIBING], stages.STAGE_PROGRESS[stages.ANALYZING_VISUALS] - 1
     last_pct = lo
     segments: list[dict[str, Any]] = []
+    last_save = 0.0
     for seg in segments_iter:  # lazy generator: this is where the work happens
         text = seg.text.strip()
         if not text:
@@ -118,6 +148,13 @@ def run(job: dict[str, Any]) -> None:
                 ],
             }
         )
+        now = time.monotonic()
+        if len(segments) == 1 or now - last_save >= PARTIAL_EVERY_S:
+            last_save = now
+            try:
+                _save_partial(job_id, info, cfg.whisper_model, segments)
+            except OSError:
+                log.warning("job %s: could not save the partial transcript", job_id)
         if total > 0:
             pct = lo + int((hi - lo) * min(seg.end / total, 1.0))
             if pct > last_pct:

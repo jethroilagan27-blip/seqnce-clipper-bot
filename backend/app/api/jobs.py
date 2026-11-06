@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Path
 
 from .. import db, stages
 from ..pipeline.runner import record_initial_version
-from ..pipeline.transcribe import load_transcript
+from ..pipeline.transcribe import load_partial, load_transcript
 from ..plan.manual import ManualEditError, apply_manual_edit
 from ..plan.preview import build_spec
 from ..plan.schema import EditingPlan
@@ -68,11 +68,16 @@ def get_analysis(job_id: str = JOB_ID) -> dict[str, Any]:
     """Transcript + visual analysis produced so far (for debugging/inspection)."""
     job = get_job_or_404(job_id)
     if not job.get("transcript_path"):
-        raise HTTPException(status_code=409, detail="Analysis is not ready yet")
+        # Still transcribing: hand out what has been recognised so far (text only) for the live view.
+        partial = load_partial(job_id) if job["status"] in (stages.QUEUED, stages.RUNNING) else None
+        if partial is None:
+            raise HTTPException(status_code=409, detail="Analysis is not ready yet")
+        return {"transcript": partial, "visual": None, "plan": None, "partial": True}
     return {
         "transcript": load_transcript(job),
         "visual": job.get("visual_json"),
         "plan": job.get("plan_json"),
+        "partial": False,
     }
 
 
