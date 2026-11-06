@@ -168,6 +168,99 @@ function errorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
+// ---------------------------------------------------------------------------
+// Accounts. Only used when the server says it needs them (/api/health -> auth_required).
+// The session token goes in an Authorization header; <video>, <img> and download links can't send
+// headers, so they carry a short-lived signed "media token" in the URL instead (see mediaUrl).
+// ---------------------------------------------------------------------------
+
+const TOKEN_KEY = "seqnce:token";
+export const JOB_STORAGE_KEY = "seqnce:jobId";
+
+let authToken: string | null = null;
+let mediaToken: string | null = null;
+let onUnauthorized: (() => void) | null = null;
+
+export function loadStoredToken(): string | null {
+  try {
+    authToken = localStorage.getItem(TOKEN_KEY);
+  } catch {
+    authToken = null; // storage unavailable (private mode): the user simply signs in each visit
+  }
+  return authToken;
+}
+
+export function setAuthToken(token: string | null) {
+  authToken = token;
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (!token) mediaToken = null;
+}
+
+export const setMediaToken = (token: string | null) => {
+  mediaToken = token;
+};
+/** Called when the server answers 401 to a request that carried a session token (expired / signed out elsewhere). */
+export const setUnauthorizedHandler = (fn: (() => void) | null) => {
+  onUnauthorized = fn;
+};
+
+/** Absolute URL for something the browser loads itself (video, image, download), with the media token attached. */
+export function mediaUrl(path: string): string {
+  const url = `${API_URL}${path}`;
+  return mediaToken ? `${url}${path.includes("?") ? "&" : "?"}st=${encodeURIComponent(mediaToken)}` : url;
+}
+
+async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, { cache: "no-store", ...init, headers });
+  } catch {
+    throw new ApiError("Can't reach the server.");
+  }
+  if (res.status === 401 && authToken) onUnauthorized?.();
+  return res;
+}
+
+export type Quota = { used: number; limit: number | null; resets_at: string | null };
+export type AuthUser = { email: string; is_admin: boolean; quota: { videos: Quota; chats: Quota } };
+export type Session = { token: string; media_token: string; user: AuthUser };
+
+async function postAuth<T>(path: string, body: unknown): Promise<T> {
+  const res = await authedFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(errorMessage(data, `Request failed (HTTP ${res.status}).`));
+  return data as T;
+}
+
+export async function getHealth(): Promise<{ status: string; ffmpeg: boolean; auth_required: boolean }> {
+  const res = await authedFetch("/api/health");
+  if (!res.ok) throw new ApiError(`The server answered HTTP ${res.status}.`);
+  return res.json();
+}
+export const login = (email: string, password: string) => postAuth<Session>("/api/auth/login", { email, password });
+export const signup = (invite_code: string, email: string, password: string) =>
+  postAuth<Session>("/api/auth/signup", { invite_code, email, password });
+export async function logout(): Promise<void> {
+  await authedFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+}
+export async function getMe(): Promise<{ auth_required: boolean; user: AuthUser; media_token: string | null }> {
+  const res = await authedFetch("/api/auth/me");
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(errorMessage(data, `Request failed (HTTP ${res.status}).`));
+  return data;
+}
+
 export function uploadVideo(
   file: File,
   settings: EditSettings,
@@ -186,6 +279,7 @@ export function uploadVideo(
     form.append("instructions", settings.instructions.trim());
 
     xhr.open("POST", `${API_URL}/api/videos/upload`);
+    if (authToken) xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total);
     };
@@ -199,6 +293,7 @@ export function uploadVideo(
       } catch {
         /* non-JSON error page */
       }
+      if (xhr.status === 401 && authToken) onUnauthorized?.();
       if (xhr.status === 201) resolve((body as { job_id: string }).job_id);
       else reject(new ApiError(errorMessage(body, `Upload failed (HTTP ${xhr.status}).`)));
     };
@@ -208,12 +303,7 @@ export function uploadVideo(
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_URL}${path}`, { cache: "no-store" });
-  } catch {
-    throw new ApiError("Can't reach the server.");
-  }
+  const res = await authedFetch(path);
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(errorMessage(body, `Request failed (HTTP ${res.status}).`));
   return body as T;
@@ -224,29 +314,24 @@ export const getMusic = () => getJson<{ tracks: string[] }>("/api/music");
 export const getAnalysis = (id: string) => getJson<Analysis>(`/api/jobs/${id}/analysis`);
 export const getResult = (id: string) => getJson<JobResult>(`/api/jobs/${id}/result`);
 export const getVersions = (id: string) => getJson<Versions>(`/api/jobs/${id}/versions`);
-export const originalUrl = (id: string) => `${API_URL}/api/videos/${id}/original`;
+export const originalUrl = (id: string) => mediaUrl(`/api/videos/${id}/original`);
 
 /** Heights the server can cut filmstrip frames at (see /api/videos/{id}/thumb). */
 export const THUMB_HEIGHTS = [48, 64, 96, 144] as const;
 /** One small frame of the original video at `t` seconds (cut on a half-second grid, cached by server and browser). */
 export const thumbUrl = (id: string, t: number, h: number) =>
-  `${API_URL}/api/videos/${id}/thumb?t=${Math.max(0, t).toFixed(1)}&h=${THUMB_HEIGHTS.find((x) => x >= h) ?? 144}`;
+  mediaUrl(`/api/videos/${id}/thumb?t=${Math.max(0, t).toFixed(1)}&h=${THUMB_HEIGHTS.find((x) => x >= h) ?? 144}`);
 
 /** Preview data for the job's plan (or an older `version`), optionally with a draft `edit` applied. Saves nothing. */
 export async function postTimeline(
   id: string,
   body: { version?: number; edit?: ManualEdit } = {},
 ): Promise<TimelineSpec> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_URL}/api/jobs/${id}/timeline`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new ApiError("Can't reach the server.");
-  }
+  const res = await authedFetch(`/api/jobs/${id}/timeline`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(errorMessage(data, `Request failed (HTTP ${res.status}).`));
   return data as TimelineSpec;
@@ -254,16 +339,11 @@ export async function postTimeline(
 
 /** Ask for a change (chat message), a hand edit, or a return to an earlier version. */
 export async function postRevision(id: string, body: RevisionBody): Promise<void> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_URL}/api/jobs/${id}/revisions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new ApiError("Can't reach the server.");
-  }
+  const res = await authedFetch(`/api/jobs/${id}/revisions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new ApiError(errorMessage(err, `Request failed (HTTP ${res.status}).`));

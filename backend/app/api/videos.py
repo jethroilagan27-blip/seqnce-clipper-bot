@@ -8,11 +8,12 @@ import threading
 import uuid
 from pathlib import Path as FsPath
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from .. import db, stages
+from ..auth import User, current_user, ensure_no_other_active_job, ensure_quota, media_user, spend_quota
 from ..config import get_settings
 from ..plan.text import clean_instructions
 from ..schemas import EditSettings, UploadResponse
@@ -51,8 +52,11 @@ def upload_video(
     music_track: str | None = Form(None),
     hook: bool = Form(True),
     instructions: str = Form(""),
+    user: User = Depends(current_user),
 ) -> UploadResponse:
     cfg = get_settings()
+    ensure_quota(user, "video")  # 429 when today's videos are used up
+    ensure_no_other_active_job(user)  # one video at a time per user (keeps the shared queue fair)
 
     try:
         edit_settings = EditSettings(
@@ -103,6 +107,7 @@ def upload_video(
                 status_code=413,
                 detail=f"Video is longer than {cfg.max_video_duration_s // 60} minutes.",
             )
+        spend_quota(user, "video")  # last check, atomic: parallel uploads can't slip past the limit
     except BaseException:
         dest.unlink(missing_ok=True)
         raise
@@ -113,6 +118,7 @@ def upload_video(
         upload_path=str(dest),
         settings=edit_settings.model_dump(),
         metadata=info.to_dict(),
+        user_id=user.id if cfg.auth_enabled else None,
     )
     log.info("job %s: uploaded %s (%.1f MB, %.1fs)", job_id, display_name, written / 1e6, info.duration)
     return UploadResponse(job_id=job_id)
@@ -121,8 +127,8 @@ def upload_video(
 VERSION = Query(None, ge=1, description="Version number; omit for the current one")
 
 
-def _output_file(job_id: str, version: int | None = None) -> FsPath:
-    job = get_job_or_404(job_id)
+def _output_file(job_id: str, version: int | None, user: User) -> FsPath:
+    job = get_job_or_404(job_id, user)
     if version is not None:
         row = db.get_version(job_id, version)
         if row is None or not row.get("output_path"):
@@ -139,25 +145,29 @@ def _output_file(job_id: str, version: int | None = None) -> FsPath:
 
 
 @router.get("/{job_id}/preview")
-def preview_video(job_id: str = JOB_ID, version: int | None = VERSION) -> FileResponse:
+def preview_video(
+    job_id: str = JOB_ID, version: int | None = VERSION, user: User = Depends(media_user)
+) -> FileResponse:
     """Inline playback (supports HTTP Range for seeking)."""
-    return FileResponse(_output_file(job_id, version), media_type="video/mp4")
+    return FileResponse(_output_file(job_id, version, user), media_type="video/mp4")
 
 
 @router.get("/{job_id}/download")
-def download_video(job_id: str = JOB_ID, version: int | None = VERSION) -> FileResponse:
+def download_video(
+    job_id: str = JOB_ID, version: int | None = VERSION, user: User = Depends(media_user)
+) -> FileResponse:
     suffix = f"-v{version}" if version else ""
     return FileResponse(
-        _output_file(job_id, version),
+        _output_file(job_id, version, user),
         media_type="video/mp4",
         filename=f"short-{job_id[:8]}{suffix}.mp4",
     )
 
 
 @router.get("/{job_id}/original")
-def original_video(job_id: str = JOB_ID) -> FileResponse:
+def original_video(job_id: str = JOB_ID, user: User = Depends(media_user)) -> FileResponse:
     """The uploaded source, for side-by-side comparison on the result screen."""
-    job = get_job_or_404(job_id)
+    job = get_job_or_404(job_id, user)
     path = FsPath(job["upload_path"])
     if not path.is_file():
         raise HTTPException(status_code=404, detail="The original video file is missing")
@@ -169,13 +179,14 @@ def thumbnail(
     job_id: str = JOB_ID,
     t: float = Query(..., ge=0, le=1_000_000, description="Seconds into the original video"),
     h: int = Query(64, description="Height in pixels: one of 48, 64, 96, 144"),
+    user: User = Depends(media_user),
 ) -> FileResponse:
     """One small JPEG frame of the original video (for the CapCut-style filmstrips).
 
     Frames are cut on a half-second grid, made on first request with FFmpeg and cached on disk
     (and by the browser), so scrolling around a timeline only ever extracts each frame once.
     """
-    job = get_job_or_404(job_id)
+    job = get_job_or_404(job_id, user)
     if h not in THUMB_HEIGHTS:
         raise HTTPException(status_code=422, detail=f"h must be one of {list(THUMB_HEIGHTS)}")
     src = FsPath(job["upload_path"])
@@ -186,7 +197,7 @@ def thumbnail(
     slot = int(min(t, max(duration - 0.3, 0.0)) * 2)  # half-second grid, always a bit before the end
     out_dir = get_settings().temp_dir / job_id / "thumbs"
     path = out_dir / f"{h}_{slot:07d}.jpg"
-    headers = {"Cache-Control": "public, max-age=86400"}  # a frame of a given job never changes
+    headers = {"Cache-Control": "private, max-age=86400"}  # a frame of a given job never changes; it is the user's own
     if path.is_file():
         return FileResponse(path, media_type="image/jpeg", headers=headers)
 

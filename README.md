@@ -95,10 +95,32 @@ Frontend (`frontend/.env.local`): `NEXT_PUBLIC_API_URL` (default `http://127.0.0
 - Seqnce itself is free. Transcription, frame extraction, editing and rendering all run locally with no per-video fee.
 - The AI step uses the **Gemini API**. On the free tier you get a limited number of requests per minute and per day (shown in Google AI Studio). Each upload uses 2 AI calls and each chat message uses 1; hand edits, restoring a version and the live preview use none. If you hit the limit the app falls back to a basic cut and tells you why.
 
+## Sharing it with other people (accounts and limits)
+
+By default Seqnce has no login (fine on your own computer). To let others use your server, turn on invite-only accounts in `.env`:
+
+```
+AUTH_ENABLED=true
+DAILY_VIDEO_LIMIT=3      # per user, rolling 24 h (admins unlimited)
+DAILY_CHAT_LIMIT=20
+```
+
+Then, from `backend/`:
+
+```bash
+uv run python -m app.admin create-user you@example.com --admin   # asks for a password
+uv run python -m app.admin invite --email friend@example.com     # prints a one-time invite code
+uv run python -m app.admin users                                  # who has used what today
+```
+
+With accounts on, nobody can reach any video without signing in, users only ever see their own jobs, uploads are refused before the file is read if you're not signed in, and each user is limited to a few videos and AI chat messages per day and one video at a time. Details: [docs/API.md](docs/API.md#accounts-ownership-and-quotas-auth_enabledtrue).
+
+This does **not** make the server safe to put on the open internet by itself: serve it over HTTPS (for example through a Cloudflare Tunnel or a reverse proxy), keep `CORS_ORIGINS` set to your real site only, and remember that your Gemini key pays for everyone's AI calls.
+
 ## Security and privacy
 
 - **What leaves your machine:** the transcript text, up to 12 small (512 px) frames sampled from the video, and any instructions or chat messages you type are sent to the Gemini API. Your video file and audio stay local. Read Google's current terms for the free tier; they differ from the paid tier.
-- **No authentication, no per-user quotas.** Anyone who can reach the backend can upload videos and spend your Gemini quota. Run it on localhost or a private network. If you want to put it on the internet, put an authenticating proxy in front of it (for example Cloudflare Access or a VPN) and add upload limits first.
+- **Accounts are off by default.** With `AUTH_ENABLED=false` anyone who can reach the backend can upload videos and spend your Gemini quota, so keep it on localhost or a private network. To share it, switch on [accounts and limits](#sharing-it-with-other-people-accounts-and-limits) and serve it over HTTPS.
 - The code takes care to avoid the usual footguns: no shell execution (FFmpeg is always called with an argument list), no client-supplied paths, server-generated filenames, MP4 signature and ffprobe validation, size and duration caps, and secrets only in the untracked `.env`.
 - Only upload footage you have the right to edit and share.
 

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from ..auth import User, current_user
 from ..pipeline.editor import list_music
 
 router = APIRouter(prefix="/api/music", tags=["music"])
 
 
 @router.get("")
-def get_music() -> dict[str, list[str]]:
+def get_music(_: User = Depends(current_user)) -> dict[str, list[str]]:
     return {"tracks": list_music()}

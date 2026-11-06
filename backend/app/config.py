@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     # --- web ---------------------------------------------------------------
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # --- accounts (off by default: local use needs no login) ----------------
+    auth_enabled: bool = False  # True = invite-only accounts, per-user ownership and quotas
+    auth_secret: str = ""  # signs media tokens; empty = a random one is created once in storage/.auth_secret
+    session_days: int = 14
+    daily_video_limit: int = 3  # uploads per rolling 24 h for a normal user (admins: unlimited)
+    daily_chat_limit: int = 20  # AI chat messages per rolling 24 h for a normal user
+    max_active_jobs_per_user: int = 1  # videos a user may have queued/processing at once
+
     # --- AI (used from Day 3 onwards) --------------------------------------
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash"

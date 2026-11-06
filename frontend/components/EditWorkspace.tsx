@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  API_URL,
   HOOK_CSS,
   getAnalysis,
+  mediaUrl,
   postTimeline,
   type Analysis,
   type ManualEdit,
@@ -157,7 +157,7 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
   const locked = !editable || working;
   const hookInvalid = draft.hookEnabled && !draft.hookText.trim();
   const canApply = dirty && !locked && !specError && !hookInvalid;
-  const finalSrc = shown.preview_url ? `${API_URL}${shown.preview_url}` : null;
+  const finalSrc = shown.preview_url ? mediaUrl(shown.preview_url) : null;
   const kept = draft.clips.reduce((a, c) => a + (c.end - c.start), 0);
 
   return (
@@ -218,7 +218,7 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
 
           {finalSrc && shown.download_url && (
             <a
-              href={`${API_URL}${shown.download_url}`}
+              href={mediaUrl(shown.download_url)}
               className="block rounded-xl bg-violet-600 px-6 py-3.5 text-center font-semibold text-white hover:bg-violet-500"
             >
               Download v{shown.version}

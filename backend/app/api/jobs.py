@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path as FsPath
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path
 
 from .. import db, stages
+from ..auth import User, can_access, current_user, spend_quota
 from ..pipeline.runner import record_initial_version
 from ..pipeline.transcribe import load_partial, load_transcript
 from ..plan.manual import ManualEditError, apply_manual_edit
@@ -51,22 +52,23 @@ def to_job_out(job: dict[str, Any]) -> JobOut:
     )
 
 
-def get_job_or_404(job_id: str) -> dict[str, Any]:
+def get_job_or_404(job_id: str, user: User) -> dict[str, Any]:
+    """The job, if it exists AND the user may use it. Someone else's job looks exactly like a missing one."""
     job = db.get_job(job_id)
-    if job is None:
+    if job is None or not can_access(user, job):
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 
 
 @router.get("/{job_id}", response_model=JobOut)
-def get_job(job_id: str = JOB_ID) -> JobOut:
-    return to_job_out(get_job_or_404(job_id))
+def get_job(job_id: str = JOB_ID, user: User = Depends(current_user)) -> JobOut:
+    return to_job_out(get_job_or_404(job_id, user))
 
 
 @router.get("/{job_id}/analysis")
-def get_analysis(job_id: str = JOB_ID) -> dict[str, Any]:
+def get_analysis(job_id: str = JOB_ID, user: User = Depends(current_user)) -> dict[str, Any]:
     """Transcript + visual analysis produced so far (for debugging/inspection)."""
-    job = get_job_or_404(job_id)
+    job = get_job_or_404(job_id, user)
     if not job.get("transcript_path"):
         # Still transcribing: hand out what has been recognised so far (text only) for the live view.
         partial = load_partial(job_id) if job["status"] in (stages.QUEUED, stages.RUNNING) else None
@@ -82,8 +84,8 @@ def get_analysis(job_id: str = JOB_ID) -> dict[str, Any]:
 
 
 @router.get("/{job_id}/result", response_model=ResultOut)
-def get_result(job_id: str = JOB_ID) -> ResultOut:
-    job = get_job_or_404(job_id)
+def get_result(job_id: str = JOB_ID, user: User = Depends(current_user)) -> ResultOut:
+    job = get_job_or_404(job_id, user)
     if job["status"] == stages.FAILED:
         raise HTTPException(status_code=409, detail=job.get("error") or "Job failed")
     revising = bool(job.get("revision_json")) and bool(job.get("output_path"))  # previous version stays viewable
@@ -100,25 +102,25 @@ def get_result(job_id: str = JOB_ID) -> ResultOut:
     )
 
 
-def _finished_job_or_409(job_id: str) -> dict[str, Any]:
-    job = get_job_or_404(job_id)
+def _finished_job_or_409(job_id: str, user: User) -> dict[str, Any]:
+    job = get_job_or_404(job_id, user)
     if job["status"] != stages.COMPLETED or not job.get("output_path"):
         raise HTTPException(status_code=409, detail="The edit isn't finished yet.")
     if db.latest_version_number(job_id) == 0:  # finished before versions existed
         record_initial_version(job_id)
-        job = get_job_or_404(job_id)
+        job = get_job_or_404(job_id, user)
     return job
 
 
 @router.get("/{job_id}/versions")
-def get_versions(job_id: str = JOB_ID) -> dict[str, Any]:
+def get_versions(job_id: str = JOB_ID, user: User = Depends(current_user)) -> dict[str, Any]:
     """Every render of this job, oldest first, with the chat message and the diff that made it."""
-    job = get_job_or_404(job_id)
+    job = get_job_or_404(job_id, user)
     if not job.get("output_path"):
         raise HTTPException(status_code=409, detail="The edit isn't finished yet.")
     if db.latest_version_number(job_id) == 0:  # finished before versions existed
         record_initial_version(job_id)
-        job = get_job_or_404(job_id)
+        job = get_job_or_404(job_id, user)
     current = int(job.get("current_version") or 1)
     versions = []
     for v in db.list_versions(job_id):
@@ -140,12 +142,15 @@ def get_versions(job_id: str = JOB_ID) -> dict[str, Any]:
 
 
 @router.post("/{job_id}/revisions", response_model=RevisionStarted, status_code=202)
-def create_revision(body: RevisionRequest, job_id: str = JOB_ID) -> RevisionStarted:
+def create_revision(
+    body: RevisionRequest, job_id: str = JOB_ID, user: User = Depends(current_user)
+) -> RevisionStarted:
     """Ask for a change (chat message), edit by hand, or go back to an earlier version.
 
     Returns immediately; poll GET /api/jobs/{id} (status/stage/progress), then GET .../versions.
+    Chat messages use the AI, so they count against the user's daily chat quota (hand edits don't).
     """
-    job = _finished_job_or_409(job_id)
+    job = _finished_job_or_409(job_id, user)
     if job.get("revision_json"):
         raise HTTPException(status_code=409, detail="Another change is still being applied.")
     new_number = db.latest_version_number(job_id) + 1
@@ -183,13 +188,17 @@ def create_revision(body: RevisionRequest, job_id: str = JOB_ID) -> RevisionStar
         }
         stage = stages.EDITING
 
+    if revision["kind"] == "chat":
+        spend_quota(user, "chat")  # atomic; 429 when today's chat messages are used up
     if not db.start_revision(job_id, revision, stage, stages.STAGE_PROGRESS[stage], plan):
         raise HTTPException(status_code=409, detail="Another change is still being applied.")
     return RevisionStarted(version=new_number)
 
 
 @router.post("/{job_id}/timeline")
-def get_timeline(body: TimelineRequest | None = None, job_id: str = JOB_ID) -> dict[str, Any]:
+def get_timeline(
+    body: TimelineRequest | None = None, job_id: str = JOB_ID, user: User = Depends(current_user)
+) -> dict[str, Any]:
     """What an edit looks like on the timeline, computed with the renderer's own cut/caption code.
 
     Available as soon as the plan exists (while the video is still rendering). Nothing is saved:
@@ -197,7 +206,7 @@ def get_timeline(body: TimelineRequest | None = None, job_id: str = JOB_ID) -> d
     which is the job's current plan or the given `version`.
     """
     body = body or TimelineRequest()
-    job = get_job_or_404(job_id)
+    job = get_job_or_404(job_id, user)
     if not job.get("transcript_path") or not job.get("metadata_json"):
         raise HTTPException(status_code=409, detail="The transcript isn't ready yet.")
     if body.version is not None:

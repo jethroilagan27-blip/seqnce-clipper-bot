@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 
 from .config import get_settings
@@ -36,6 +36,40 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, created_at);
+
+-- Accounts (only used when AUTH_ENABLED=true). Passwords are scrypt hashes; session and invite
+-- tokens are stored only as SHA-256 hashes, so a leaked database cannot be replayed.
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    is_admin      INTEGER NOT NULL DEFAULT 0,
+    disabled      INTEGER NOT NULL DEFAULT 0,
+    video_limit   INTEGER,                      -- NULL = the server default
+    chat_limit    INTEGER,
+    created_at    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS invites (
+    code_hash  TEXT PRIMARY KEY,
+    email      TEXT,                            -- when set, only this address can use the code
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at    TEXT,
+    used_by    INTEGER
+);
+CREATE TABLE IF NOT EXISTS usage (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    kind       TEXT NOT NULL,                   -- video | chat
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_usage ON usage(user_id, kind, created_at);
 
 -- Every render of a job is a numbered version with its own plan and output file.
 CREATE TABLE IF NOT EXISTS plan_versions (
@@ -93,6 +127,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE jobs ADD COLUMN visual_json TEXT")
         if "current_version" not in existing:
             conn.execute("ALTER TABLE jobs ADD COLUMN current_version INTEGER NOT NULL DEFAULT 1")
+        if "user_id" not in existing:
+            conn.execute("ALTER TABLE jobs ADD COLUMN user_id INTEGER")  # owner; NULL = created without accounts
         if "revision_json" not in existing:
             conn.execute("ALTER TABLE jobs ADD COLUMN revision_json TEXT")  # pending revision request
 
@@ -113,14 +149,15 @@ def create_job(
     upload_path: str,
     settings: dict[str, Any],
     metadata: dict[str, Any] | None,
+    user_id: int | None = None,
 ) -> None:
     now = _now()
     with connect() as conn:
         conn.execute(
             """INSERT INTO jobs (id, status, stage, progress, original_filename,
                                  upload_path, settings_json, metadata_json,
-                                 created_at, updated_at)
-               VALUES (?, 'queued', 'uploaded', 5, ?, ?, ?, ?, ?, ?)""",
+                                 created_at, updated_at, user_id)
+               VALUES (?, 'queued', 'uploaded', 5, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job_id,
                 original_filename,
@@ -129,6 +166,7 @@ def create_job(
                 json.dumps(metadata) if metadata else None,
                 now,
                 now,
+                user_id,
             ),
         )
 
@@ -261,3 +299,170 @@ def requeue_interrupted_jobs() -> int:
             (_now(),),
         )
         return cur.rowcount
+
+
+# ---------------------------------------------------------------------------
+# accounts, sessions, invites, usage
+# ---------------------------------------------------------------------------
+
+def _iso_in(delta: timedelta) -> str:
+    return (datetime.now(timezone.utc) + delta).isoformat(timespec="seconds")
+
+
+def create_user(email: str, password_hash: str, *, is_admin: bool = False) -> int | None:
+    """Returns the new user id, or None when that email already has an account."""
+    try:
+        with connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO users (email, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)",
+                (email, password_hash, int(is_admin), _now()),
+            )
+            return int(cur.lastrowid)
+    except sqlite3.IntegrityError:
+        return None
+
+
+def get_user(user_id: int) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_email(email: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_users() -> list[dict[str, Any]]:
+    with connect() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM users ORDER BY id")]
+
+
+_USER_FIELDS = {"password_hash", "is_admin", "disabled", "video_limit", "chat_limit"}
+
+
+def update_user(user_id: int, **fields: Any) -> None:
+    bad = set(fields) - _USER_FIELDS
+    if bad:
+        raise ValueError(f"unknown user fields: {sorted(bad)}")
+    if not fields:
+        return
+    with connect() as conn:
+        conn.execute(
+            f"UPDATE users SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?",
+            (*fields.values(), user_id),
+        )
+
+
+def add_session(token_hash: str, user_id: int, lifetime: timedelta) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (token_hash, user_id, _now(), _iso_in(lifetime)),
+        )
+
+
+def get_session_user(token_hash: str) -> dict[str, Any] | None:
+    """The (enabled) user owning a live session, or None."""
+    with connect() as conn:
+        row = conn.execute(
+            """SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
+               WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0""",
+            (token_hash, _now()),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_session(token_hash: str) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+
+
+def delete_user_sessions(user_id: int) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+
+
+def add_invite(code_hash: str, email: str | None, lifetime: timedelta) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO invites (code_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (code_hash, email, _now(), _iso_in(lifetime)),
+        )
+
+
+def create_user_with_invite(code_hash: str, email: str, password_hash: str) -> tuple[str, int | None]:
+    """Spend an invite and create the account in ONE transaction.
+
+    Returns ("ok", user_id), ("invalid", None) for an unknown/used/expired/other-email invite, or
+    ("exists", None). Two people racing for one code can never both get in."""
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        invite = conn.execute(
+            "SELECT email FROM invites WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?",
+            (code_hash, _now()),
+        ).fetchone()
+        if invite is None or (invite["email"] and invite["email"] != email):
+            return "invalid", None
+        if conn.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
+            return "exists", None
+        user_id = int(
+            conn.execute(
+                "INSERT INTO users (email, password_hash, is_admin, created_at) VALUES (?, ?, 0, ?)",
+                (email, password_hash, _now()),
+            ).lastrowid
+        )
+        conn.execute("UPDATE invites SET used_at = ?, used_by = ? WHERE code_hash = ?", (_now(), user_id, code_hash))
+        return "ok", user_id
+
+
+def try_record_usage(user_id: int, kind: str, limit: int | None, window: timedelta) -> bool:
+    """Record one use of `kind` unless the user already used `limit` of them in the last `window`.
+
+    Check and insert happen in one transaction, so parallel requests cannot slip past the limit."""
+    since = (datetime.now(timezone.utc) - window).isoformat(timespec="seconds")
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if limit is not None:
+            used = conn.execute(
+                "SELECT COUNT(*) AS n FROM usage WHERE user_id = ? AND kind = ? AND created_at > ?",
+                (user_id, kind, since),
+            ).fetchone()["n"]
+            if used >= limit:
+                return False
+        conn.execute("INSERT INTO usage (user_id, kind, created_at) VALUES (?, ?, ?)", (user_id, kind, _now()))
+        return True
+
+
+def usage_in_window(user_id: int, kind: str, window: timedelta) -> tuple[int, str | None]:
+    """(uses in the window, time the oldest of them leaves the window)."""
+    since = (datetime.now(timezone.utc) - window).isoformat(timespec="seconds")
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM usage WHERE user_id = ? AND kind = ? AND created_at > ?",
+            (user_id, kind, since),
+        ).fetchone()
+    resets = None
+    if row["oldest"]:
+        resets = (datetime.fromisoformat(row["oldest"]) + window).isoformat(timespec="seconds")
+    return int(row["n"]), resets
+
+
+def count_active_jobs(user_id: int) -> int:
+    with connect() as conn:
+        return int(
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM jobs WHERE user_id = ? AND status IN ('queued', 'running')", (user_id,)
+            ).fetchone()["n"]
+        )
+
+
+def purge_auth() -> None:
+    """Forget expired sessions and invites and old usage records (called at startup)."""
+    now = _now()
+    old = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat(timespec="seconds")
+    with connect() as conn:
+        conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
+        conn.execute("DELETE FROM invites WHERE expires_at <= ? AND used_at IS NULL", (now,))
+        conn.execute("DELETE FROM usage WHERE created_at <= ?", (old,))

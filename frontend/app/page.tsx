@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import AuthGate, { type AccountInfo } from "@/components/AuthGate";
 import ProcessingView from "@/components/ProcessingView";
 import ResultView from "@/components/ResultView";
+import Shell, { quotaBlock } from "@/components/Shell";
 import UploadCard from "@/components/UploadCard";
 import {
   ApiError,
+  JOB_STORAGE_KEY,
   getJob,
   getResult,
   getVersions,
@@ -19,18 +22,21 @@ import {
 } from "@/lib/api";
 
 const POLL_MS = 1500;
-const STORAGE_KEY = "seqnce:jobId";
 
 function remember(id: string | null) {
   try {
-    if (id) localStorage.setItem(STORAGE_KEY, id);
-    else localStorage.removeItem(STORAGE_KEY);
+    if (id) localStorage.setItem(JOB_STORAGE_KEY, id);
+    else localStorage.removeItem(JOB_STORAGE_KEY);
   } catch {
     /* storage unavailable (private mode): resume simply won't work */
   }
 }
 
-export default function Home() {
+export default function Page() {
+  return <AuthGate>{(account) => <Studio account={account} />}</AuthGate>;
+}
+
+function Studio({ account }: { account: AccountInfo }) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [result, setResult] = useState<JobResult | null>(null);
@@ -44,7 +50,7 @@ export default function Home() {
   // Resume a job after a page refresh.
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(JOB_STORAGE_KEY);
       // Deferred (not synchronous) so the first client render matches the server render.
       if (saved && /^[0-9a-f]{32}$/.test(saved)) queueMicrotask(() => setJobId(saved));
     } catch {
@@ -110,6 +116,7 @@ export default function Home() {
     } finally {
       abortRef.current = null;
       setUploadProgress(null);
+      account.refresh(); // the quota changed (or the server said why not)
     }
   }
 
@@ -118,8 +125,10 @@ export default function Home() {
     try {
       await postRevision(jobId, body);
     } catch (e) {
+      account.refresh();
       return e instanceof Error ? e.message : "Something went wrong.";
     }
+    account.refresh(); // chat messages count against the daily limit
     // Show "working" immediately; polling takes over from here.
     setJob((prev) => (prev ? { ...prev, status: "queued", revising: true, error: null, progress: 50 } : prev));
     setPollNonce((n) => n + 1);
@@ -134,27 +143,19 @@ export default function Home() {
     setJob(null);
     setResult(null);
     setError(null);
+    account.refresh();
   }
 
   const view = result ? "result" : jobId ? "processing" : "upload";
 
   return (
-    <main className={`mx-auto w-full flex-1 px-5 py-10 ${view === "result" ? "max-w-5xl" : "max-w-xl"}`}>
-      <header className="mb-8 flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-lg font-bold">
-          S
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold leading-tight">Seqnce</h1>
-          <p className="text-sm text-white/50">Turn raw footage into a ready-to-post short.</p>
-        </div>
-      </header>
-
+    <Shell user={account.user} onSignOut={account.user ? account.signOut : undefined} wide={view === "result"}>
       {view === "upload" && (
         <UploadCard
           busy={uploadProgress !== null}
           uploadProgress={uploadProgress}
           error={error}
+          blockedReason={quotaBlock(account.user?.quota.videos, "video", "videos")}
           onStart={handleStart}
           onCancel={() => abortRef.current?.()}
         />
@@ -170,6 +171,6 @@ export default function Home() {
       {view === "result" && result && (
         <ResultView result={result} job={job} versions={versions} onRevise={handleRevise} onRestart={reset} />
       )}
-    </main>
+    </Shell>
   );
 }

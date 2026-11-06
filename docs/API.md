@@ -107,3 +107,37 @@ Once Whisper has produced its first sentence (and until the transcript is final)
 
 ### GET /api/videos/{id}/thumb?t=12.5&h=64
 One small JPEG frame of the **original** video, for filmstrips. `t` = seconds (0–1,000,000, clamped to just before the end), `h` ∈ {48, 64, 96, 144} (anything else → `422`). Frames are cut on a half-second grid with FFmpeg on first request (at most 3 at a time), cached on disk under the job's temp folder (removed with the job) and sent with `Cache-Control: max-age=86400`. `404` unknown job, missing file, or no frame at that time.
+
+## Accounts, ownership and quotas (`AUTH_ENABLED=true`)
+
+Off by default: with it off every request is served as a built-in local admin with no limits, `/api/auth/login|signup` return `404`, and nothing below applies. With it on:
+
+- **Everything under `/api/` except `/api/health`, `/api/auth/signup` and `/api/auth/login` needs `Authorization: Bearer <token>`** (`401` otherwise). The interactive docs (`/docs`, `/openapi.json`) are switched off.
+- **Sign-up is invite-only.** An admin creates a one-time code with `uv run python -m app.admin invite [--email x] [--days 7]`; only its hash is stored.
+- **Ownership:** a job belongs to the user who uploaded it. Someone else's job answers `404`, exactly like a job that doesn't exist. Admins can open any job; jobs from before accounts existed are admin-only.
+- **Passwords** are scrypt hashes (min. 10 characters). Sessions and invite codes are stored only as SHA-256 hashes. Sign-in is throttled (5 failures per email and 30 per address per 15 minutes → `429`, in memory), and failures never reveal whether an email exists.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/auth/signup` | `{invite_code, email, password}` → `201 {token, media_token, user}` |
+| POST | `/api/auth/login` | `{email, password}` → `{token, media_token, user}` |
+| POST | `/api/auth/logout` | ends this session (`204`) |
+| GET | `/api/auth/me` | `{auth_required, user, media_token}`; call it hourly to renew the media token |
+
+`user` = `{email, is_admin, quota: {videos: {used, limit, resets_at}, chats: {…}}}`; `limit: null` = unlimited.
+`/api/health` also returns `auth_required` so a client knows whether to show a sign-in screen.
+
+### Media tokens
+`<video>`, `<img>` and download links can't send an `Authorization` header, so `GET /api/videos/{id}/original|preview|download|thumb` also accept `?st=<media_token>`: an HMAC-signed token (valid 6 hours, tied to the user, checked against the job owner and the user's enabled state). It works **only** on those four endpoints; it is not a login.
+
+### Quotas (rolling 24 hours, per user)
+- **Videos** (`DAILY_VIDEO_LIMIT`, default 3): spent when an upload is accepted. **Chat messages** (`DAILY_CHAT_LIMIT`, default 20): spent by `POST /revisions` with `{message}` (the AI call). Hand edits, restoring a version, the live preview and thumbnails cost nothing.
+- Over the limit → `429` with a readable message ("…More free up in about 3 hours."). The check-and-spend is one database transaction, so parallel requests can't slip past it.
+- A user may have `MAX_ACTIVE_JOBS_PER_USER` (default 1) videos queued/processing at once → `409`.
+- Admins have no limits; per-user overrides: `python -m app.admin set-limits EMAIL --videos 10 --chats default`.
+
+### Upload gate
+`POST /api/videos/upload` is checked **before its body is read**: without a valid session it answers `401`, and a declared size over `MAX_UPLOAD_MB` answers `413`, so a stranger can't make the server spool a huge file just to be refused.
+
+### Admin tool
+`uv run python -m app.admin` (from `backend/`): `invite`, `create-user EMAIL [--admin]`, `users`, `disable|enable EMAIL`, `make-admin EMAIL`, `set-limits`, `reset-password`. Passwords come from a hidden prompt or `SEQNCE_ADMIN_PASSWORD`, never from the command line.

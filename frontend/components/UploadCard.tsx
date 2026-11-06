@@ -7,6 +7,8 @@ type Props = {
   busy: boolean;
   uploadProgress: number | null; // 0..1 while uploading
   error: string | null;
+  /** Set when the user's daily limit is used up; the upload button is disabled and this is shown. */
+  blockedReason?: string | null;
   onStart: (file: File, settings: EditSettings) => void;
   onCancel: () => void;
 };
@@ -46,7 +48,7 @@ function Toggle(props: {
   );
 }
 
-export default function UploadCard({ busy, uploadProgress, error, onStart, onCancel }: Props) {
+export default function UploadCard({ busy, uploadProgress, error, blockedReason, onStart, onCancel }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -227,6 +229,12 @@ export default function UploadCard({ busy, uploadProgress, error, onStart, onCan
           ))}
       </div>
 
+      {blockedReason && (
+        <p role="status" className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+          {blockedReason}
+        </p>
+      )}
+
       {shownError && (
         <p role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {shownError}
@@ -250,7 +258,7 @@ export default function UploadCard({ busy, uploadProgress, error, onStart, onCan
         </div>
       ) : (
         <button
-          disabled={!file || busy}
+          disabled={!file || busy || !!blockedReason}
           onClick={() => file && onStart(file, settings)}
           className="w-full rounded-xl bg-violet-600 px-6 py-3.5 font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/30"
         >
