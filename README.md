@@ -1,4 +1,4 @@
-# ClipForge – automated short-form video editor (MVP)
+# Seqnce – automated short-form video editor (MVP)
 
 Upload a talking-head MP4 → local transcription + AI analysis → auto-edited vertical 9:16 short with captions.
 Free/open-source stack: Next.js, FastAPI, SQLite, FFmpeg, faster-whisper, Gemini free tier.

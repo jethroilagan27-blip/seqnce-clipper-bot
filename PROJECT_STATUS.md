@@ -1,6 +1,11 @@
 # Project Status
 
-**Current day:** 7 of 7 · **Last updated:** 2026-11-06
+**Product name:** Seqnce (renamed from "ClipForge" on 2026-11-06; the repo folder / GitHub repo name `bot-clip` is unchanged).
+**MVP (Days 1–7):** done · **Post-MVP roadmap** (user-requested 2026-11-06):
+1. ✅ **Hook title + instructions box** – big coloured headline in the upper part for the first ~4 s (text and colour chosen by the AI, cleaned/validated in Python); optional free-text instructions fed to the planner.
+2. ✅ **Editable plans, versions, re-render, chat revisions, clip diff.** Every render is a version (v1, v2…); chat messages re-plan with Gemini from the saved transcript (1 call + re-render); hand edits (hook text/colour/on-off, captions, remove clips) need no AI; "go back to vX" is instant; the UI shows a chat panel next to the player, version tabs, and added/removed/trimmed badges. A failed change never loses the current version.
+3. ⏳ CapCut-style timeline: live preview in the browser, manual trim/delete/reorder, edit captions/hook, then re-render.
+
 **State:** the full MVP workflow works end to end. Final judgement on *real* footage is still pending (see "Not verified").
 
 ## Completed (all acceptance-criteria steps implemented and exercised)
@@ -15,7 +20,8 @@
 9. Housekeeping: old jobs auto-deleted after `RETENTION_DAYS` (7).
 
 ## Verification evidence
-- **68 automated tests pass** (`cd backend && ..\tools\uv\uv.exe run pytest`), including real FFmpeg renders for portrait, square, 480p, 720p, 1080p sources; failure paths (ffmpeg crash, junk output, unexpected exception hides internals); interrupted-job requeue; path-traversal attempts; music audibility measured by band energy.
+- **95 automated tests pass** (78 before the revision work + 17 for diff/versions/chat/manual/restore/failure/retention). Live (real Whisper + Gemini `gemini-3.5-flash-lite`): chat "make it ~20 s and turn the hook red" cut 34 s → 18 s, hook red, diff correct. In the browser: hand edit (hook on + cyan + remove clip) produced v2 with the cyan hook burned in; a chat request while the AI was rate-limited showed a clear error and left v2 untouched.
+- Earlier milestone: 78 tests (`cd backend && ..\tools\uv\uv.exe run pytest`), including real FFmpeg renders for portrait, square, 480p, 720p, 1080p sources; failure paths (ffmpeg crash, junk output, unexpected exception hides internals); interrupted-job requeue; path-traversal attempts; music audibility measured by band energy.
 - **Live run** (real Whisper + real Gemini) on a 60 s narrated sample → 23–41 s vertical video. Frames inspected: captions bold, readable, inside safe area.
 - **Caption sync measured**: transcribing the rendered audio, 24/24 caption pages matched speech, mean offset −0.01 s (worst 0.37 s).
 - **Browser**: full flow through the real UI incl. page refresh mid-job; player loads the 1080×1920, 41 s file.
@@ -34,7 +40,9 @@
 - Captions are plain pages (no word-by-word animation); no face tracking, B-roll, transitions, or accounts.
 - Frame sampling is even, not content-aware beyond scene-cut hints.
 - Repo is in OneDrive; `tools/`, `.venv/`, `node_modules/`, `storage/` get synced – consider moving the project.
-- Nothing is committed to git yet.
+- Chat edits cannot re-order clips (chronological only), and cannot add things the editor doesn't support (B-roll, transitions, new captions styles) – the AI is told to say so. Trimming a clip to exact seconds by hand waits for the timeline editor (step 3).
+- `gemini-3.5-flash` was rate-limited during testing (free tier); the AI-dependent checks ran on `gemini-3.5-flash-lite`. If chat edits report "rate-limited", wait a minute or set `GEMINI_MODEL=gemini-3.5-flash-lite` in `.env`.
+- Hook title is shown only for the first ~4 s (duration not yet adjustable in the UI). Fallback (no-AI) plans have no hook, but you can add one by hand. Font is Arial Black/Arial via libass; non-Latin scripts / emoji are not supported in the hook.
 - Preview launcher sometimes races when restarting the backend (wait a few seconds after stopping).
 
 ## Next recommended action

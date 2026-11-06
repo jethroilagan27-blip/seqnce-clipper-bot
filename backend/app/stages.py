@@ -10,6 +10,7 @@ PREPARING = "preparing"
 TRANSCRIBING = "transcribing"
 ANALYZING_VISUALS = "analyzing_visuals"
 PLANNING = "planning"
+REVISING = "revising"  # re-planning an existing edit after a chat message
 EDITING = "editing"
 RENDERING = "rendering"
 COMPLETED = "completed"
@@ -20,6 +21,7 @@ STAGE_PROGRESS: dict[str, int] = {
     TRANSCRIBING: 25,
     ANALYZING_VISUALS: 45,
     PLANNING: 60,
+    REVISING: 55,
     EDITING: 75,
     RENDERING: 90,
     COMPLETED: 100,

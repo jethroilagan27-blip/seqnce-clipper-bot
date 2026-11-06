@@ -25,8 +25,10 @@ def run(job: dict[str, Any]) -> None:
     total = float(spec["total"])
     music = resolve_music(job["plan_json"]["music"].get("track")) if spec.get("music") else None
 
+    # Version 1 keeps the original name; later versions get their own file so every version stays playable.
+    version = db.latest_version_number(job_id) + 1 if job.get("revision_json") else 1
     partial = cfg.outputs_dir / f"{job_id}.partial.mp4"
-    final = cfg.outputs_dir / f"{job_id}.mp4"
+    final = cfg.outputs_dir / (f"{job_id}.mp4" if version == 1 else f"{job_id}_v{version}.mp4")
     partial.unlink(missing_ok=True)
 
     cmd = [cfg.ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1",

@@ -63,29 +63,35 @@ def run(job: dict[str, Any]) -> None:
             warnings.append("Background music was requested but no music files were found; skipped.")
 
     captions_on = plan.captions.enabled
+    pages: list[cap.Page] = []
     if captions_on:
         out_words = cap.remap_words(words, cuts)
         pages = cap.build_pages(out_words, plan.captions.max_words_per_line)
-        if pages:
-            (work / ASS_NAME).write_text(cap.render_ass(pages, OUT_W, OUT_H), encoding="utf-8")
-        else:
+        if not pages:
             captions_on = False
             warnings.append("No caption text could be aligned; captions skipped.")
 
+    hook_on = plan.hook.enabled and bool(plan.hook.text.strip())
+    if captions_on or hook_on:
+        title = cap.HookTitle(plan.hook.text, plan.hook.color, plan.hook.duration_s) if hook_on else None
+        (work / ASS_NAME).write_text(
+            cap.render_ass(pages, OUT_W, OUT_H, hook=title, total=total), encoding="utf-8"
+        )
+
     crop = compute_crop(int(meta["width"]), int(meta["height"]), plan.reframe.focus_x)
     graph = build_filtergraph(
-        cuts, crop, captions=captions_on, music=music is not None,
+        cuts, crop, captions=captions_on or hook_on, music=music is not None,
         music_volume=plan.music.volume, total=total,
     )
     (work / "filter.txt").write_text(graph, encoding="utf-8")
     (work / "cuts.json").write_text(
         json.dumps({"total": round(total, 3), "cuts": [vars(c) for c in cuts], "music": music.name if music else None,
-                    "captions": captions_on}, indent=1),
+                    "captions": captions_on, "hook": hook_on}, indent=1),
         encoding="utf-8",
     )
 
     if warnings != plan.warnings:
         plan.warnings = warnings
         db.update_job(job_id, plan_json=plan.model_dump())
-    log.info("job %s: edit prepared, %d cuts, %.1fs, captions=%s music=%s",
-             job_id, len(cuts), total, captions_on, bool(music))
+    log.info("job %s: edit prepared, %d cuts, %.1fs, captions=%s hook=%s music=%s",
+             job_id, len(cuts), total, captions_on, hook_on, bool(music))

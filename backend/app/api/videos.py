@@ -7,12 +7,13 @@ import re
 import uuid
 from pathlib import Path as FsPath
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from .. import db, stages
 from ..config import get_settings
+from ..plan.text import clean_instructions
 from ..schemas import EditSettings, UploadResponse
 from ..services import media
 from .jobs import JOB_ID, get_job_or_404
@@ -44,6 +45,8 @@ def upload_video(
     remove_silence: bool = Form(True),
     background_music: bool = Form(False),
     music_track: str | None = Form(None),
+    hook: bool = Form(True),
+    instructions: str = Form(""),
 ) -> UploadResponse:
     cfg = get_settings()
 
@@ -54,6 +57,8 @@ def upload_video(
             remove_silence=remove_silence,
             background_music=background_music,
             music_track=music_track or None,
+            hook=hook,
+            instructions=clean_instructions(instructions),
         )
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="Invalid editing settings") from exc
@@ -109,28 +114,39 @@ def upload_video(
     return UploadResponse(job_id=job_id)
 
 
-def _output_file(job_id: str) -> FsPath:
+VERSION = Query(None, ge=1, description="Version number; omit for the current one")
+
+
+def _output_file(job_id: str, version: int | None = None) -> FsPath:
     job = get_job_or_404(job_id)
-    if job["status"] != stages.COMPLETED or not job.get("output_path"):
-        raise HTTPException(status_code=409, detail="The edited video is not ready yet")
-    path = FsPath(job["output_path"])
+    if version is not None:
+        row = db.get_version(job_id, version)
+        if row is None or not row.get("output_path"):
+            raise HTTPException(status_code=404, detail="That version doesn't exist")
+        path = FsPath(row["output_path"])
+    else:
+        # A job that is revising still has its previous video; only unfinished first renders are "not ready".
+        if not job.get("output_path"):
+            raise HTTPException(status_code=409, detail="The edited video is not ready yet")
+        path = FsPath(job["output_path"])
     if not path.is_file():
         raise HTTPException(status_code=404, detail="The edited video file is missing")
     return path
 
 
 @router.get("/{job_id}/preview")
-def preview_video(job_id: str = JOB_ID) -> FileResponse:
+def preview_video(job_id: str = JOB_ID, version: int | None = VERSION) -> FileResponse:
     """Inline playback (supports HTTP Range for seeking)."""
-    return FileResponse(_output_file(job_id), media_type="video/mp4")
+    return FileResponse(_output_file(job_id, version), media_type="video/mp4")
 
 
 @router.get("/{job_id}/download")
-def download_video(job_id: str = JOB_ID) -> FileResponse:
+def download_video(job_id: str = JOB_ID, version: int | None = VERSION) -> FileResponse:
+    suffix = f"-v{version}" if version else ""
     return FileResponse(
-        _output_file(job_id),
+        _output_file(job_id, version),
         media_type="video/mp4",
-        filename=f"short-{job_id[:8]}.mp4",
+        filename=f"short-{job_id[:8]}{suffix}.mp4",
     )
 
 

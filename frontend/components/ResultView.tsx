@@ -1,6 +1,18 @@
 "use client";
 
-import { API_URL, formatBytes, formatDuration, type JobResult, type VideoInfo } from "@/lib/api";
+import { useState } from "react";
+import {
+  API_URL,
+  formatBytes,
+  formatDuration,
+  type Job,
+  type JobResult,
+  type ManualEdit,
+  type VideoInfo,
+  type Versions,
+} from "@/lib/api";
+import PlanEditor from "./PlanEditor";
+import RevisionPanel from "./RevisionPanel";
 
 function InfoCard({ title, info }: { title: string; info: VideoInfo | null }) {
   return (
@@ -20,71 +32,112 @@ function InfoCard({ title, info }: { title: string; info: VideoInfo | null }) {
   );
 }
 
-function PlanSummary({ plan }: { plan: NonNullable<JobResult["plan"]> }) {
-  return (
-    <div className="space-y-3 rounded-lg border border-white/10 p-4 text-sm">
-      <div className="flex items-center justify-between gap-3">
-        <p className="font-medium">What was kept</p>
-        <span
-          className={`rounded-full px-2.5 py-0.5 text-xs ${
-            plan.source === "ai" ? "bg-violet-500/20 text-violet-200" : "bg-amber-400/20 text-amber-100"
-          }`}
-        >
-          {plan.source === "ai" ? "Chosen by AI" : "Basic cut (AI unavailable)"}
-        </span>
-      </div>
-      {plan.summary.main_message && <p className="text-white/70">{plan.summary.main_message}</p>}
-      <ul className="space-y-1.5">
-        {plan.clips.map((c) => (
-          <li key={c.id} className="flex gap-3 text-white/60">
-            <span className="w-24 shrink-0 tabular-nums text-violet-300">
-              {formatDuration(c.start)}–{formatDuration(c.end)}
-            </span>
-            <span>
-              <span className="text-white/80">{c.purpose.replace("_", " ")}</span>
-              {c.reason && <> — {c.reason}</>}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {plan.source === "fallback" && plan.fallback_reason && (
-        <p className="text-xs text-amber-100/80">Why: {plan.fallback_reason}</p>
-      )}
-      {plan.warnings.length > 0 && <p className="text-xs text-white/40">Notes: {plan.warnings.join(" · ")}</p>}
-    </div>
-  );
-}
+type Props = {
+  result: JobResult;
+  job: Job | null;
+  versions: Versions | null;
+  onRevise: (body: { message: string } | { edit: ManualEdit } | { restore_version: number }) => Promise<string | null>;
+  onRestart: () => void;
+};
 
-export default function ResultView({ result, onRestart }: { result: JobResult; onRestart: () => void }) {
+export default function ResultView({ result, job, versions, onRevise, onRestart }: Props) {
+  const current = versions?.current ?? result.version;
+  // Which version is on screen. Remembered together with the current version it was picked under,
+  // so a newly finished revision automatically takes over the screen.
+  const [picked, setPicked] = useState<{ under: number; version: number } | null>(null);
+  const selected = picked && picked.under === current ? picked.version : current;
+
+  const shown = versions?.versions.find((v) => v.version === selected) ?? null;
+  const busy = !!job && (job.revising || job.status === "queued" || job.status === "running");
+  const src = shown?.preview_url ?? result.preview_url;
+  const download = shown?.download_url ?? result.download_url;
+  const select = (version: number) => setPicked({ under: current, version });
+
   return (
     <div className="space-y-6">
-      <div className="mx-auto aspect-[9/16] max-h-[70vh] overflow-hidden rounded-2xl border border-white/10 bg-black">
-        <video
-          src={`${API_URL}${result.preview_url}`}
-          controls
-          playsInline
-          className="h-full w-full object-contain"
-        />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
+        <div className="space-y-4">
+          {versions && versions.versions.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Versions">
+              {versions.versions.map((v) => (
+                <button
+                  key={v.version}
+                  role="tab"
+                  aria-selected={v.version === selected}
+                  onClick={() => select(v.version)}
+                  className={`rounded-full px-3 py-1 text-xs ${
+                    v.version === selected
+                      ? "bg-violet-600 font-semibold text-white"
+                      : "border border-white/15 text-white/60 hover:text-white"
+                  }`}
+                >
+                  v{v.version}
+                  {v.version === current && " · latest"}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="relative mx-auto aspect-[9/16] max-h-[70vh] overflow-hidden rounded-2xl border border-white/10 bg-black">
+            <video
+              key={src}
+              src={`${API_URL}${src}`}
+              controls
+              playsInline
+              className={`h-full w-full object-contain transition ${busy ? "opacity-40" : ""}`}
+            />
+            {busy && (
+              <div className="pointer-events-none absolute inset-x-0 top-4 text-center text-xs font-medium text-white/80">
+                Making a new version…
+              </div>
+            )}
+          </div>
+          <a
+            href={`${API_URL}${download}`}
+            className="block rounded-xl bg-violet-600 px-6 py-3.5 text-center font-semibold text-white hover:bg-violet-500"
+          >
+            Download {versions && versions.versions.length > 1 ? `v${selected}` : "MP4"}
+          </a>
+        </div>
+
+        <div className="space-y-6">
+          {versions && job ? (
+            <>
+              <RevisionPanel
+                versions={versions.versions}
+                selected={selected}
+                job={job}
+                busy={busy}
+                onSend={(message) => onRevise({ message })}
+                onSelect={select}
+              />
+              {shown && (
+                <PlanEditor
+                  key={`${shown.version}-${current}`}
+                  version={shown}
+                  isCurrent={shown.version === current}
+                  busy={busy}
+                  onApply={(edit) => onRevise({ edit })}
+                  onRestore={(version) => onRevise({ restore_version: version })}
+                />
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-white/50">Loading versions…</p>
+          )}
+        </div>
       </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
         <InfoCard title="Original" info={result.original} />
-        <InfoCard title="Edited" info={result.rendered} />
+        <InfoCard title={`Edited${versions && versions.versions.length > 1 ? " (latest)" : ""}`} info={result.rendered} />
       </div>
-      {result.plan && <PlanSummary plan={result.plan} />}
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <a
-          href={`${API_URL}${result.download_url}`}
-          className="flex-1 rounded-xl bg-violet-600 px-6 py-3.5 text-center font-semibold text-white hover:bg-violet-500"
-        >
-          Download MP4
-        </a>
-        <button
-          onClick={onRestart}
-          className="flex-1 rounded-xl border border-white/20 px-6 py-3.5 font-medium hover:bg-white/5"
-        >
-          Edit another video
-        </button>
-      </div>
+
+      <button
+        onClick={onRestart}
+        className="w-full rounded-xl border border-white/20 px-6 py-3.5 font-medium hover:bg-white/5"
+      >
+        Edit another video
+      </button>
     </div>
   );
 }

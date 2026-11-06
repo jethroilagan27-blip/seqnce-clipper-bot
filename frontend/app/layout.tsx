@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ClipForge – AI short-form video editor",
+  title: "Seqnce – AI short-form video editor",
   description: "Upload raw footage and get an automatically edited vertical short.",
 };
 

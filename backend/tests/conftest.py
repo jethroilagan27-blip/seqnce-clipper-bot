@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app.ai.schemas import PlanProposal, ProposedClip, VisualAnalysis
+from app.ai.schemas import PlanProposal, ProposedClip, RevisionProposal, VisualAnalysis
 from app.config import get_settings
 
 
@@ -28,9 +28,15 @@ class FakeProvider:
     def __init__(self):
         self.calls: list[dict] = []
         self.plan_responses: list[PlanProposal] = []  # consumed in order by plan requests
+        self.revision_responses: list[RevisionProposal] = []  # consumed in order by revision requests
+        self.revision_error: Exception | None = None  # raised by revision requests when set
 
     def generate_structured(self, prompt, response_model, images=None):
         self.calls.append({"prompt": prompt, "n_images": len(images or []), "model": response_model.__name__})
+        if response_model is RevisionProposal:
+            if self.revision_error:
+                raise self.revision_error
+            return self.revision_responses.pop(0)
         if response_model is PlanProposal:
             if self.plan_responses:
                 return self.plan_responses.pop(0)
@@ -53,6 +59,7 @@ def fake_provider(monkeypatch: pytest.MonkeyPatch) -> FakeProvider:
     prov = FakeProvider()
     monkeypatch.setattr("app.pipeline.visual.get_provider", lambda: prov)
     monkeypatch.setattr("app.pipeline.planner.get_provider", lambda: prov)
+    monkeypatch.setattr("app.pipeline.revise.get_provider", lambda: prov)
     return prov
 
 

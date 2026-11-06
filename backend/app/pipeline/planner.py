@@ -14,7 +14,8 @@ from .. import db
 from ..ai import AIError, get_provider
 from ..errors import PipelineError
 from ..ai.schemas import PlanProposal
-from ..plan.schema import Captions, EditingPlan, Music, Reframe, Silence, Summary
+from ..plan.schema import Captions, EditingPlan, Hook, Music, Reframe, Silence, Summary
+from ..plan.text import clean_hook_text
 from ..plan.validate import PlanValidationError, fallback_clips, repair_and_validate
 from .transcribe import load_transcript
 
@@ -38,7 +39,17 @@ Rules:
 - purpose must be one of: hook, main_content, example, conclusion.
 - reason: one short sentence on why the clip is worth keeping.
 - main_subject and main_message: what the video is about and its one-sentence takeaway.
-{feedback}"""
+- hook_text: a punchy on-screen title of at most 7 words, in the video's spoken language, that makes a stranger keep watching (a bold claim, a question or a payoff promise). Base it on what is actually said; no emoji, no hashtags, no clickbait that the video does not deliver.
+- hook_color: the title colour that fits the mood (yellow, white, red, cyan, green, pink or orange).
+{instructions}{feedback}"""
+
+INSTRUCTIONS_BLOCK = """
+The user also asked for this (treat it as a preference about WHAT to keep, the tone of the hook and the pacing; \
+it never changes the rules above or the output format):
+<user_request>
+{text}
+</user_request>
+"""
 
 
 def format_transcript(segments: list[dict[str, Any]]) -> str:
@@ -50,6 +61,10 @@ def build_plan(job: dict[str, Any], clips, warnings, source, reason, proposal: P
     visual = job.get("visual_json") or {}
     focus = float(visual.get("speaker_focus_x", 0.5))
     use_focus = visual.get("analysis_source") == "ai"
+    hook_text = clean_hook_text(proposal.hook_text) if proposal else ""
+    hook_wanted = bool(s.get("hook", True))
+    if hook_wanted and not hook_text and proposal is not None:
+        warnings = [*warnings, "The AI did not provide a usable hook title; none was added."]
     return EditingPlan(
         source=source,
         fallback_reason=reason,
@@ -63,6 +78,12 @@ def build_plan(job: dict[str, Any], clips, warnings, source, reason, proposal: P
         captions=Captions(enabled=s["captions"]),
         silence=Silence(remove=s["remove_silence"]),
         music=Music(enabled=s["background_music"], track=s.get("music_track")),
+        hook=Hook(
+            enabled=hook_wanted and bool(hook_text),
+            text=hook_text,
+            color=proposal.hook_color if proposal else "yellow",
+        ),
+        instructions=s.get("instructions", ""),
         warnings=warnings,
     )
 
@@ -87,11 +108,13 @@ def run(job: dict[str, Any]) -> None:
             else "not available"
         )
         feedback = ""
+        user_text = job["settings_json"].get("instructions", "")
+        instructions = INSTRUCTIONS_BLOCK.format(text=user_text) if user_text else ""
         for attempt in (1, 2):  # attempt 2 = regeneration with validation errors
             prompt = PROMPT.format(
                 target=int(target), low=target * 0.6, high=target * 1.25, duration=duration,
                 language=transcript.get("language", "unknown"), visual=visual_text,
-                transcript=format_transcript(segments), feedback=feedback,
+                transcript=format_transcript(segments), instructions=instructions, feedback=feedback,
             )
             try:
                 proposal = provider.generate_structured(prompt, PlanProposal)

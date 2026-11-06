@@ -73,6 +73,9 @@ See [docs/API.md](docs/API.md).
 Single table `jobs` (see `backend/app/db.py`): `id, status, stage, progress, original_filename, upload_path, audio_path, transcript_path, output_path, settings_json, metadata_json, output_metadata_json, plan_json, error, created_at, updated_at`.
 `status` ∈ queued | running | completed | failed. `stage` ∈ uploaded | preparing | transcribing | analyzing_visuals | planning | editing | rendering | completed.
 
+### Versions and revisions (added after the MVP)
+`jobs.plan_json` / `output_path` / `output_metadata_json` always describe the **current** version. Table `plan_versions(job_id, version, source, message, reply, plan_json, changes_json, output_path, output_metadata_json)` holds every render: v1 is written when the first pipeline finishes (and backfilled for older jobs), later versions by `pipeline/runner.py::_run_revision`. `jobs.revision_json` marks a pending revision (`kind` chat|manual|restore); the worker runs `revise → editor → render` (chat), `editor → render` (manual) or just re-points to the old file (restore). A failed revision restores the previous plan/output and only sets `jobs.error`. Files: `{job}.mp4` (v1), `{job}_v{n}.mp4`. Diffs come from `plan/diff.py`, hand edits from `plan/manual.py`.
+
 ## 7. Background processing
 One daemon thread started in FastAPI's lifespan. Loop: `claim_next_job()` (atomic `BEGIN IMMEDIATE` select+update) → `run_job()` → repeat; sleeps 1 s when idle. Each stage updates `stage`/`progress` in SQLite; the frontend polls. On startup, jobs stuck in `running` (crash/restart) are put back to `queued`. Errors: `MediaError`-type exceptions carry a user-safe message; anything else is logged with a traceback and the user sees a generic message. One job at a time (rendering is CPU-bound).
 
@@ -91,7 +94,9 @@ One daemon thread started in FastAPI's lifespan. Loop: `claim_next_job()` (atomi
   "reframe": { "strategy": "center | face_center", "focus_x": 0.5 },
   "captions": { "enabled": true, "max_words_per_line": 4, "max_lines": 2 },
   "silence": { "remove": true, "max_pause_s": 0.6 },
-  "music": { "enabled": false, "track": null, "volume": 0.12 }
+  "music": { "enabled": false, "track": null, "volume": 0.12 },
+  "hook": { "enabled": true, "text": "Nobody tells you this", "color": "yellow", "duration_s": 4.0 },
+  "instructions": "user's free-text request (≤ 500 chars)"
 }
 ```
 Validation (all in Python, before any FFmpeg call): JSON parses and matches the Pydantic model; `0 ≤ start < end ≤ video duration`; each clip ≥ 1 s; no overlaps/duplicates (IoU/containment check); clips sorted chronologically unless an explicit `order` field says otherwise; total duration within ±25 % of target (else trim/pad the last clip or re-ask); clip edges snapped to transcript segment boundaries so sentences aren't cut mid-word; music track must exist in `storage/music/`. On failure: one auto-repair attempt (clamp/sort/dedupe), then one regeneration with the validation errors appended to the prompt, then fall back to a deterministic plan (first N seconds of best-scoring segments).

@@ -21,7 +21,7 @@ pytestmark = [
 
 def test_live_plan(client):
     t0 = time.time()
-    job_id = _upload(client, SAMPLE, target_duration="30").json()["job_id"]
+    job_id = _upload(client, SAMPLE, target_duration="30", instructions="Make the hook a question.").json()["job_id"]
     job = _wait_done(client, job_id, timeout=600)
     assert job["status"] == "completed", job
     data = client.get(f"/api/jobs/{job_id}/analysis").json()
@@ -35,6 +35,7 @@ def test_live_plan(client):
     total = sum(c["end"] - c["start"] for c in plan["clips"])
     assert 30 * 0.6 <= total <= 30 * 1.25
     assert plan["summary"]["main_message"]
+    assert plan["hook"]["enabled"] and plan["hook"]["text"], plan["hook"]
     for c in plan["clips"]:
         assert 0 <= c["start"] < c["end"] <= 60.0
 
@@ -48,3 +49,29 @@ def test_live_plan(client):
     shutil.copy(get_settings().temp_dir / job_id / "captions.ass", ROOT_DIR / "samples" / "live_captions.ass")
     rendered = client.get(f"/api/jobs/{job_id}/result").json()["rendered"]
     print("RENDERED:", rendered)
+
+
+def test_live_chat_revision(client):
+    """Real Whisper + real Gemini: first edit, then a chat request that must change the clips."""
+    job_id = _upload(client, SAMPLE, target_duration="45").json()["job_id"]
+    assert _wait_done(client, job_id, timeout=600)["status"] == "completed"
+    v1 = client.get(f"/api/jobs/{job_id}/versions").json()["versions"][0]
+    assert v1["plan"]["source"] == "ai", v1["plan"].get("fallback_reason")
+
+    r = client.post(f"/api/jobs/{job_id}/revisions",
+                    json={"message": "Make it about 20 seconds long and turn the hook text red."})
+    assert r.status_code == 202, r.text
+    job = _wait_done(client, job_id, timeout=300)
+    print("\nJOB:", job["status"], job["current_version"], job["error"])
+    assert job["status"] == "completed" and job["error"] is None, job["error"]
+
+    data = client.get(f"/api/jobs/{job_id}/versions").json()
+    v2 = data["versions"][1]
+    print("REPLY:", v2["reply"])
+    print("CHANGES:", json.dumps(v2["changes"], indent=1))
+    print("V1 total:", v1["changes"] or sum(c["end"] - c["start"] for c in v1["plan"]["clips"]),
+          "V2 total:", sum(c["end"] - c["start"] for c in v2["plan"]["clips"]))
+    assert data["current"] == 2 and v2["reply"]
+    assert v2["plan"]["hook"]["color"] == "red"
+    assert v2["plan"]["target_duration"] <= 30
+    assert v2["has_output"]

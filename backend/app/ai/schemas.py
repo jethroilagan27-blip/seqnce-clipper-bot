@@ -21,6 +21,31 @@ class PlanProposal(BaseModel):
     main_subject: str
     main_message: str = Field(description="The one-sentence takeaway of the video")
     clips: list[ProposedClip]
+    hook_text: str = Field(
+        default="",
+        description="A punchy on-screen title of at most 7 words that makes people keep watching",
+    )
+    hook_color: Literal["yellow", "white", "red", "cyan", "green", "pink", "orange"] = Field(
+        default="yellow", description="Title colour that suits the mood of the video"
+    )
+
+
+class RevisionProposal(BaseModel):
+    """What we ask the AI for when the user requests a change to an existing edit."""
+
+    reply: str = Field(
+        description="One or two friendly sentences telling the user what you changed (or why you could not)"
+    )
+    clips: list[ProposedClip] = Field(
+        description="The COMPLETE new list of clips to keep. Clips the user did not ask to change keep their exact start/end"
+    )
+    hook_enabled: bool = Field(description="Whether the title at the top is shown")
+    hook_text: str = Field(description="Title of at most 7 words (the current one unless the user wants it changed)")
+    hook_color: Literal["yellow", "white", "red", "cyan", "green", "pink", "orange"]
+    captions_enabled: bool
+    target_duration: int = Field(
+        description="Aimed-for total length in seconds (15-90). Keep the current value unless the user asks for another length"
+    )
 
 
 class VisualMoment(BaseModel):

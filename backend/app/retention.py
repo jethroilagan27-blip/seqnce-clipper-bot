@@ -25,9 +25,14 @@ def purge_old_jobs(retention_days: int) -> int:
             "WHERE status IN ('completed','failed') AND updated_at < ?", (cutoff,)
         ).fetchall()
         for r in rows:
-            for p in (r["upload_path"], r["output_path"]):
+            files = [r["upload_path"], r["output_path"]]
+            files += [v["output_path"] for v in conn.execute(
+                "SELECT output_path FROM plan_versions WHERE job_id = ?", (r["id"],)
+            )]
+            for p in files:
                 if p:
                     Path(p).unlink(missing_ok=True)
+            conn.execute("DELETE FROM plan_versions WHERE job_id = ?", (r["id"],))
             shutil.rmtree(cfg.temp_dir / r["id"], ignore_errors=True)
             (cfg.subtitles_dir / f"{r['id']}.ass").unlink(missing_ok=True)
             conn.execute("DELETE FROM jobs WHERE id = ?", (r["id"],))

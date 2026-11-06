@@ -8,14 +8,18 @@ import {
   ApiError,
   getJob,
   getResult,
+  getVersions,
+  postRevision,
   uploadVideo,
   type EditSettings,
   type Job,
   type JobResult,
+  type RevisionBody,
+  type Versions,
 } from "@/lib/api";
 
 const POLL_MS = 1500;
-const STORAGE_KEY = "clipforge:jobId";
+const STORAGE_KEY = "seqnce:jobId";
 
 function remember(id: string | null) {
   try {
@@ -30,9 +34,12 @@ export default function Home() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [result, setResult] = useState<JobResult | null>(null);
+  const [versions, setVersions] = useState<Versions | null>(null);
+  const [pollNonce, setPollNonce] = useState(0); // bump to restart polling (e.g. after a revision is queued)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<(() => void) | null>(null);
+  const loadedRef = useRef(false); // result + versions fetched for the current job
 
   // Resume a job after a page refresh.
   useEffect(() => {
@@ -56,12 +63,19 @@ export default function Home() {
         const j = await getJob(jobId);
         if (cancelled) return;
         setJob(j);
-        if (j.status === "completed" && j.has_output) {
-          const r = await getResult(jobId);
-          if (!cancelled) setResult(r);
+        if (j.has_output && (j.status === "completed" || j.revising)) {
+          // Load the finished video once, and again whenever a revision finishes.
+          if (!j.revising || !loadedRef.current) {
+            const [r, v] = await Promise.all([getResult(jobId), getVersions(jobId)]);
+            if (cancelled) return;
+            setResult(r);
+            setVersions(v);
+            loadedRef.current = true;
+          }
+          if (!j.revising) return;
+        } else if (j.status === "completed" || j.status === "failed") {
           return;
         }
-        if (j.status === "completed" || j.status === "failed") return;
       } catch (e) {
         if (cancelled) return;
         if (e instanceof ApiError && e.message === "Job not found") {
@@ -80,7 +94,7 @@ export default function Home() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [jobId]);
+  }, [jobId, pollNonce]);
 
   async function handleStart(file: File, settings: EditSettings) {
     setError(null);
@@ -99,7 +113,22 @@ export default function Home() {
     }
   }
 
+  async function handleRevise(body: RevisionBody): Promise<string | null> {
+    if (!jobId) return "No video is open.";
+    try {
+      await postRevision(jobId, body);
+    } catch (e) {
+      return e instanceof Error ? e.message : "Something went wrong.";
+    }
+    // Show "working" immediately; polling takes over from here.
+    setJob((prev) => (prev ? { ...prev, status: "queued", revising: true, error: null, progress: 50 } : prev));
+    setPollNonce((n) => n + 1);
+    return null;
+  }
+
   function reset() {
+    loadedRef.current = false;
+    setVersions(null);
     remember(null);
     setJobId(null);
     setJob(null);
@@ -110,13 +139,13 @@ export default function Home() {
   const view = result ? "result" : jobId ? "processing" : "upload";
 
   return (
-    <main className="mx-auto w-full max-w-xl flex-1 px-5 py-10">
+    <main className={`mx-auto w-full flex-1 px-5 py-10 ${view === "result" ? "max-w-5xl" : "max-w-xl"}`}>
       <header className="mb-8 flex items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-lg font-bold">
-          C
+          S
         </div>
         <div>
-          <h1 className="text-xl font-semibold leading-tight">ClipForge</h1>
+          <h1 className="text-xl font-semibold leading-tight">Seqnce</h1>
           <p className="text-sm text-white/50">Turn raw footage into a ready-to-post short.</p>
         </div>
       </header>
@@ -138,7 +167,9 @@ export default function Home() {
           <p className="text-white/50">Starting…</p>
         ))}
 
-      {view === "result" && result && <ResultView result={result} onRestart={reset} />}
+      {view === "result" && result && (
+        <ResultView result={result} job={job} versions={versions} onRevise={handleRevise} onRestart={reset} />
+      )}
     </main>
   );
 }

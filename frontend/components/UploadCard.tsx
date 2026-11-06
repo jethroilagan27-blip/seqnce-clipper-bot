@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MAX_UPLOAD_MB, formatBytes, getMusic, type EditSettings } from "@/lib/api";
+import { MAX_INSTRUCTIONS, MAX_UPLOAD_MB, formatBytes, getMusic, type EditSettings } from "@/lib/api";
 
 type Props = {
   busy: boolean;
@@ -57,6 +57,8 @@ export default function UploadCard({ busy, uploadProgress, error, onStart, onCan
     captions: true,
     remove_silence: true,
     background_music: false,
+    hook: true,
+    instructions: "",
   });
 
   const wantsMusic = settings.background_music;
@@ -154,6 +156,31 @@ export default function UploadCard({ busy, uploadProgress, error, onStart, onCan
             <span>90s</span>
           </div>
         </div>
+        <div className="rounded-lg border border-white/10 px-4 py-3">
+          <label htmlFor="instructions" className="flex items-baseline justify-between">
+            <span className="text-sm font-medium">Tell the editor what you want (optional)</span>
+            <span className="text-xs tabular-nums text-white/40">
+              {settings.instructions.length}/{MAX_INSTRUCTIONS}
+            </span>
+          </label>
+          <textarea
+            id="instructions"
+            rows={3}
+            maxLength={MAX_INSTRUCTIONS}
+            disabled={busy}
+            value={settings.instructions}
+            onChange={(e) => setSettings({ ...settings, instructions: e.target.value })}
+            placeholder="e.g. Focus on the pricing tips, skip the intro story, make the hook a question."
+            className="mt-2 w-full resize-none rounded-md border border-white/10 bg-[#15151c] px-3 py-2 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none"
+          />
+        </div>
+        <Toggle
+          label="Hook title"
+          hint="Big coloured headline at the top for the first seconds"
+          checked={settings.hook}
+          disabled={busy}
+          onChange={(v) => setSettings({ ...settings, hook: v })}
+        />
         <Toggle
           label="Captions"
           hint="Burn readable subtitles into the video"

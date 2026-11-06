@@ -10,7 +10,11 @@ export type EditSettings = {
   remove_silence: boolean;
   background_music: boolean;
   music_track?: string | null;
+  hook: boolean;
+  instructions: string;
 };
+
+export const MAX_INSTRUCTIONS = 500;
 
 export type VideoInfo = {
   duration: number;
@@ -21,6 +25,16 @@ export type VideoInfo = {
   has_audio: boolean;
   audio_codec: string | null;
   size_bytes: number;
+};
+
+export const HOOK_CSS: Record<string, string> = {
+  yellow: "#ffe600",
+  white: "#ffffff",
+  red: "#ff4b4b",
+  cyan: "#00e6ff",
+  green: "#50e650",
+  pink: "#ff64c8",
+  orange: "#ff9600",
 };
 
 export type JobStatus = "queued" | "running" | "completed" | "failed";
@@ -34,12 +48,16 @@ export type Job = {
   settings: EditSettings & { music_track: string | null };
   original: VideoInfo | null;
   has_output: boolean;
-  error: string | null;
+  current_version: number;
+  revising: boolean;
+  error: string | null; // for a finished job: why the last change failed
   created_at: string;
   updated_at: string;
 };
 
 export type PlanClip = { id: string; start: number; end: number; purpose: string; reason: string };
+
+export type Hook = { enabled: boolean; text: string; color: string; duration_s: number };
 
 export type Plan = {
   source: "ai" | "fallback";
@@ -47,11 +65,51 @@ export type Plan = {
   summary: { main_subject: string; main_message: string };
   target_duration: number;
   clips: PlanClip[];
+  hook?: Hook;
+  captions?: { enabled: boolean };
+  instructions?: string;
   warnings: string[];
 };
 
+export type ClipStatus = "kept" | "trimmed" | "added" | "removed";
+export type ChangedClip = PlanClip & { status: ClipStatus; before?: { start: number; end: number } };
+export type Changes = {
+  clips: ChangedClip[];
+  settings: { field: string; before: string; after: string }[];
+  counts: Record<ClipStatus, number>;
+  unchanged: boolean;
+  old_total: number;
+  new_total: number;
+};
+
+export type Version = {
+  version: number;
+  source: "initial" | "chat" | "manual" | "restore";
+  message: string | null;
+  reply: string | null;
+  created_at: string;
+  plan: Plan;
+  changes: Changes | null;
+  has_output: boolean;
+  preview_url: string | null;
+  download_url: string | null;
+};
+
+export type Versions = { current: number; versions: Version[] };
+
+export type ManualEdit = {
+  hook_enabled?: boolean;
+  hook_text?: string;
+  hook_color?: string;
+  captions_enabled?: boolean;
+  remove_clips?: string[];
+};
+
+export type RevisionBody = { message: string } | { edit: ManualEdit } | { restore_version: number };
+
 export type JobResult = {
   job_id: string;
+  version: number;
   original: VideoInfo | null;
   rendered: VideoInfo | null;
   plan: Plan | null;
@@ -101,6 +159,8 @@ export function uploadVideo(
     form.append("remove_silence", String(settings.remove_silence));
     form.append("background_music", String(settings.background_music));
     if (settings.background_music && settings.music_track) form.append("music_track", settings.music_track);
+    form.append("hook", String(settings.hook));
+    form.append("instructions", settings.instructions.trim());
 
     xhr.open("POST", `${API_URL}/api/videos/upload`);
     xhr.upload.onprogress = (e) => {
@@ -139,7 +199,26 @@ async function getJson<T>(path: string): Promise<T> {
 export const getJob = (id: string) => getJson<Job>(`/api/jobs/${id}`);
 export const getMusic = () => getJson<{ tracks: string[] }>("/api/music");
 export const getAnalysis = (id: string) => getJson<Analysis>(`/api/jobs/${id}/analysis`);
-export const getResult =(id: string) => getJson<JobResult>(`/api/jobs/${id}/result`);
+export const getResult = (id: string) => getJson<JobResult>(`/api/jobs/${id}/result`);
+export const getVersions = (id: string) => getJson<Versions>(`/api/jobs/${id}/versions`);
+
+/** Ask for a change (chat message), a hand edit, or a return to an earlier version. */
+export async function postRevision(id: string, body: RevisionBody): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/api/jobs/${id}/revisions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError("Can't reach the server.");
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new ApiError(errorMessage(err, `Request failed (HTTP ${res.status}).`));
+  }
+}
 
 export function formatDuration(seconds: number): string {
   const s = Math.round(seconds);

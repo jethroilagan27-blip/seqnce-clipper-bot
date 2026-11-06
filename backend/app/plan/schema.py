@@ -53,6 +53,19 @@ class Silence(BaseModel):
     max_pause_s: float = Field(default=0.6, ge=0.2, le=3.0)
 
 
+HookColor = Literal["yellow", "white", "red", "cyan", "green", "pink", "orange"]
+HOOK_COLORS: tuple[str, ...] = ("yellow", "white", "red", "cyan", "green", "pink", "orange")
+
+
+class Hook(BaseModel):
+    """Big title text shown at the top for the first seconds of the short."""
+
+    enabled: bool = False
+    text: str = Field(default="", max_length=80)
+    color: HookColor = "yellow"
+    duration_s: float = Field(default=4.0, ge=1, le=10)
+
+
 class Music(BaseModel):
     enabled: bool = False
     track: str | None = None
@@ -71,6 +84,8 @@ class EditingPlan(BaseModel):
     captions: Captions = Field(default_factory=Captions)
     silence: Silence = Field(default_factory=Silence)
     music: Music = Field(default_factory=Music)
+    hook: Hook = Field(default_factory=Hook)
+    instructions: str = ""  # the user's free-text request, echoed back in the UI
     warnings: list[str] = Field(default_factory=list)
 
     @property

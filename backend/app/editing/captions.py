@@ -85,19 +85,56 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
 Style: Default,Arial,{size},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,2,2,{mx},{mx},{mv},1
+Style: Hook,Arial Black,{hsize},{hcolor},&H000000FF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,{houtline},{hshadow},8,{mx},{mx},{hmv},1
 
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 """
 
+# ASS colours are &HAABBGGRR (alpha, blue, green, red).
+HOOK_ASS_COLORS = {
+    "yellow": "&H0000E6FF",
+    "white": "&H00FFFFFF",
+    "red": "&H004B4BFF",
+    "cyan": "&H00FFE600",
+    "green": "&H0050E650",
+    "pink": "&H00C864FF",
+    "orange": "&H000096FF",
+}
 
-def render_ass(pages: Sequence[Page], width: int = 1080, height: int = 1920) -> str:
-    """Safe area: 8 % side margins, bottom margin clears the TikTok/Reels UI."""
+HOOK_FADE_IN_MS = 180
+HOOK_FADE_OUT_MS = 300
+
+
+@dataclass
+class HookTitle:
+    text: str
+    color: str = "yellow"
+    duration_s: float = 4.0
+
+
+def render_ass(
+    pages: Sequence[Page],
+    width: int = 1080,
+    height: int = 1920,
+    hook: HookTitle | None = None,
+    total: float | None = None,
+) -> str:
+    """Safe area: 8 % side margins; captions sit above the TikTok/Reels bottom UI and the
+    hook sits below the top bar, in the upper part of the frame."""
     header = ASS_HEADER.format(
-        w=width, h=height, size=round(width * 0.07), mx=round(width * 0.08), mv=round(height * 0.22)
+        w=width, h=height, size=round(width * 0.07), mx=round(width * 0.08), mv=round(height * 0.22),
+        hsize=round(width * 0.105), hcolor=HOOK_ASS_COLORS.get(hook.color if hook else "yellow", HOOK_ASS_COLORS["yellow"]),
+        houtline=round(width * 0.011), hshadow=round(width * 0.004), hmv=round(height * 0.115),
     )
     lines = [
         f"Dialogue: 0,{_ts(p.start)},{_ts(p.end)},Default,,0,0,0,,{_escape(p.text)}"
         for p in pages
     ]
+    if hook and hook.text.strip():
+        end = hook.duration_s if total is None else min(hook.duration_s, total)
+        lines.append(
+            f"Dialogue: 1,{_ts(0)},{_ts(end)},Hook,,0,0,0,,"
+            f"{{\\fad({HOOK_FADE_IN_MS},{HOOK_FADE_OUT_MS})}}{_escape(hook.text.upper())}"
+        )
     return header + "\n".join(lines) + "\n"
