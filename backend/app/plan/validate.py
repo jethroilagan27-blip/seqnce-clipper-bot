@@ -128,6 +128,55 @@ def repair_and_validate(
     return result, list(dict.fromkeys(warnings))  # de-duplicated, order kept
 
 
+MIN_MANUAL_CLIP_S = 1.0
+MAX_MANUAL_TOTAL_S = 180.0  # 3 minutes: the longest short we let a hand edit produce
+MAX_CLIPS = 30
+
+
+def validate_manual_clips(proposed: Sequence[Any], video_duration: float) -> list[Clip]:
+    """Hand-made clip list (from the timeline editor). Unlike the AI path nothing is snapped or
+    trimmed to a target length: the user's exact positions are kept, only made safe.
+
+    Raises PlanValidationError (user-safe messages) when the list can't be used."""
+    errors: list[str] = []
+    items: list[dict[str, Any]] = []
+    for i, p in enumerate(proposed, 1):
+        try:
+            start, end = float(p.start), float(p.end)
+        except (TypeError, ValueError):
+            errors.append(f"clip {i} has invalid times")
+            continue
+        if not (math.isfinite(start) and math.isfinite(end)):
+            errors.append(f"clip {i} has invalid times")
+            continue
+        start, end = max(0.0, start), min(video_duration, end)
+        if end - start < MIN_MANUAL_CLIP_S:
+            errors.append(f"clip {i} is shorter than {MIN_MANUAL_CLIP_S:g}s")
+            continue
+        items.append({"start": start, "end": end, "purpose": p.purpose, "reason": (p.reason or "")[:200]})
+    if len(proposed) > MAX_CLIPS:
+        errors.append(f"too many clips (max {MAX_CLIPS})")
+    if errors:
+        raise PlanValidationError(errors)
+    if not items:
+        raise PlanValidationError(["at least one clip has to stay in the video"])
+
+    items.sort(key=lambda c: (c["start"], c["end"]))
+    merged: list[dict[str, Any]] = []
+    for c in items:
+        if merged and c["start"] <= merged[-1]["end"] + 0.05:  # overlapping or touching
+            merged[-1]["end"] = max(merged[-1]["end"], c["end"])
+        else:
+            merged.append(dict(c))
+    total = _total(merged)
+    if total > MAX_MANUAL_TOTAL_S:
+        raise PlanValidationError([f"the video would be {total:.0f}s long; the maximum is {MAX_MANUAL_TOTAL_S:.0f}s"])
+    return [
+        Clip(id=f"c{i}", start=round(c["start"], 3), end=round(c["end"], 3), purpose=c["purpose"], reason=c["reason"])
+        for i, c in enumerate(merged, 1)
+    ]
+
+
 _FILLERS = {"um", "uh", "hmm", "so", "okay", "ok", "yeah", "well"}
 
 

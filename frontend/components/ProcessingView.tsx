@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatBytes, formatDuration, getAnalysis, type Analysis, type Job } from "@/lib/api";
+import LiveEditView from "./LiveEditView";
 
 function AnalysisPreview({ jobId }: { jobId: string }) {
   const [data, setData] = useState<Analysis | null>(null);
@@ -127,6 +128,8 @@ export default function ProcessingView({ job, onRestart }: Props) {
           );
         })}
       </ol>
+
+      {!failed && !preparedOnly && current >= 3 && <LiveEditView job={job} />}
 
       {failed && (
         <p role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">

@@ -55,7 +55,13 @@ export type Job = {
   updated_at: string;
 };
 
-export type PlanClip = { id: string; start: number; end: number; purpose: string; reason: string };
+export type PlanClip = {
+  id: string;
+  start: number;
+  end: number;
+  purpose: "hook" | "main_content" | "example" | "conclusion";
+  reason: string;
+};
 
 export type Hook = { enabled: boolean; text: string; color: string; duration_s: number };
 
@@ -101,8 +107,22 @@ export type ManualEdit = {
   hook_enabled?: boolean;
   hook_text?: string;
   hook_color?: string;
+  hook_duration_s?: number;
   captions_enabled?: boolean;
   remove_clips?: string[];
+  clips?: { start: number; end: number; purpose: PlanClip["purpose"]; reason: string }[];
+};
+
+/** What the browser needs to preview an edit (computed by the server with the renderer's own code). */
+export type TimelineSpec = {
+  total: number;
+  cuts: { start: number; end: number; out_start: number }[];
+  pages: { start: number; end: number; text: string }[];
+  captions_enabled: boolean;
+  hook: { enabled: boolean; text: string; color: string; duration_s: number };
+  reframe: { strategy: string; focus_x: number };
+  source: { width: number; height: number; duration: number };
+  clips: PlanClip[];
 };
 
 export type RevisionBody = { message: string } | { edit: ManualEdit } | { restore_version: number };
@@ -121,8 +141,9 @@ export type Analysis = {
   transcript: {
     language: string;
     duration: number;
-    segments: { start: number; end: number; text: string }[];
+    segments: { start: number; end: number; text: string; words?: { start: number; end: number; word: string }[] }[];
   };
+  plan?: Plan | null;
   visual: {
     analysis_source: "ai" | "fallback";
     main_subject: string;
@@ -201,6 +222,27 @@ export const getMusic = () => getJson<{ tracks: string[] }>("/api/music");
 export const getAnalysis = (id: string) => getJson<Analysis>(`/api/jobs/${id}/analysis`);
 export const getResult = (id: string) => getJson<JobResult>(`/api/jobs/${id}/result`);
 export const getVersions = (id: string) => getJson<Versions>(`/api/jobs/${id}/versions`);
+export const originalUrl = (id: string) => `${API_URL}/api/videos/${id}/original`;
+
+/** Preview data for the job's plan (or an older `version`), optionally with a draft `edit` applied. Saves nothing. */
+export async function postTimeline(
+  id: string,
+  body: { version?: number; edit?: ManualEdit } = {},
+): Promise<TimelineSpec> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/api/jobs/${id}/timeline`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError("Can't reach the server.");
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(errorMessage(data, `Request failed (HTTP ${res.status}).`));
+  return data as TimelineSpec;
+}
 
 /** Ask for a change (chat message), a hand edit, or a return to an earlier version. */
 export async function postRevision(id: string, body: RevisionBody): Promise<void> {

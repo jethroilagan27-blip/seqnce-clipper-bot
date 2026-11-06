@@ -77,3 +77,25 @@ Then poll `GET /api/jobs/{id}`: while it runs `status` is `queued|running`, `rev
     "has_output": true, "preview_url": "…", "download_url": "…" } ] }
 ```
 `changes` is computed against the version that was current when the change was made. `removed` clips carry the ids/times of the *old* plan.
+
+## Timeline editing (clips by hand, live preview data)
+
+### Hand edits can now replace the whole clip list
+`POST /api/jobs/{id}/revisions` with `{"edit": {"clips": [{"start": 12.3, "end": 20.0, "purpose": "main_content", "reason": ""}], "hook_duration_s": 3}}`.
+- `clips` is the **complete** new list in source-video seconds (not combinable with `remove_clips`). Positions are kept exactly as sent (no snapping to sentences); the server clamps to the video, sorts, merges overlapping/touching clips, and rejects clips shorter than 1 s, more than 30 clips, or more than 180 s in total (`422` with a readable message).
+- At render time each clip's edges still land on the first/last spoken word inside it (plus a tiny pad), so a trim that falls in silence moves to the nearest word.
+- `hook_duration_s` (1–10): how long the hook title stays on screen.
+
+### POST /api/jobs/{id}/timeline
+Body (optional): `{"version": 2, "edit": { …same shape as a hand edit… }}`. Saves nothing. Returns what the edit looks like, computed with **the same code the renderer uses**:
+```json
+{ "total": 14.02,
+  "cuts":  [{"start": 0.0, "end": 1.7, "out_start": 0.0}],        // source ranges that are played, in order
+  "pages": [{"start": 0.0, "end": 1.6, "text": "Welcome to"}],   // caption pages, output time
+  "captions_enabled": true,
+  "hook":  {"enabled": true, "text": "…", "color": "cyan", "duration_s": 4.0},
+  "reframe": {"strategy": "focus", "focus_x": 0.5},
+  "source": {"width": 1280, "height": 720, "duration": 59.9},
+  "clips": [ … plan clips … ] }
+```
+Available as soon as the plan exists (`409` before), also while the video is still rendering. `404` unknown version, `422` invalid draft. The browser uses it to play the **original** video as the edit (`GET /api/videos/{id}/original`, Range supported) with the crop, captions and title drawn on top.

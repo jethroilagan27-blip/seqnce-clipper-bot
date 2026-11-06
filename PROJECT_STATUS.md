@@ -4,7 +4,7 @@
 **MVP (Days 1–7):** done · **Post-MVP roadmap** (user-requested 2026-11-06):
 1. ✅ **Hook title + instructions box** – big coloured headline in the upper part for the first ~4 s (text and colour chosen by the AI, cleaned/validated in Python); optional free-text instructions fed to the planner.
 2. ✅ **Editable plans, versions, re-render, chat revisions, clip diff.** Every render is a version (v1, v2…); chat messages re-plan with Gemini from the saved transcript (1 call + re-render); hand edits (hook text/colour/on-off, captions, remove clips) need no AI; "go back to vX" is instant; the UI shows a chat panel next to the player, version tabs, and added/removed/trimmed badges. A failed change never loses the current version.
-3. ⏳ CapCut-style timeline: live preview in the browser, manual trim/delete/reorder, edit captions/hook, then re-render.
+3. ✅ **Timeline editor + live preview.** The browser plays the ORIGINAL video as the edit (cuts, 9:16 crop, captions and hook drawn on top; the cut list and caption pages come from the renderer's own code via `POST /api/jobs/{id}/timeline`, so preview = render). Drag clip edges (snap to words, zoom, keyboard/±0.1 s nudges), click transcript sentences to cut/restore them, edit hook text/colour/duration and captions, then Apply (one render = one new version). While a video is still processing the transcript appears live, and the plan becomes a playable preview + timeline before the render finishes.
 
 **State:** the full MVP workflow works end to end. Final judgement on *real* footage is still pending (see "Not verified").
 
@@ -20,7 +20,8 @@
 9. Housekeeping: old jobs auto-deleted after `RETENTION_DAYS` (7).
 
 ## Verification evidence
-- **95 automated tests pass** (78 before the revision work + 17 for diff/versions/chat/manual/restore/failure/retention). Live (real Whisper + Gemini `gemini-3.5-flash-lite`): chat "make it ~20 s and turn the hook red" cut 34 s → 18 s, hook red, diff correct. In the browser: hand edit (hook on + cyan + remove clip) produced v2 with the cyan hook burned in; a chat request while the AI was rate-limited showed a clear error and left v2 untouched.
+- **Frontend:** `npm test` (9 unit tests for the timeline helpers), typecheck, lint, production build.
+- **111 backend tests pass** (78 at the MVP + 17 for versions/chat/manual/restore/failure/retention + 16 for manual clips, the timeline spec and a preview==render check). Live (real Whisper + Gemini `gemini-3.5-flash-lite`): chat "make it ~20 s and turn the hook red" cut 34 s → 18 s, hook red, diff correct. In the browser (step 2): hand edit (hook on + cyan + remove clip) produced v2 with the cyan hook burned in; a chat request while the AI was rate-limited showed a clear error and left v2 untouched.
 - Earlier milestone: 78 tests (`cd backend && ..\tools\uv\uv.exe run pytest`), including real FFmpeg renders for portrait, square, 480p, 720p, 1080p sources; failure paths (ffmpeg crash, junk output, unexpected exception hides internals); interrupted-job requeue; path-traversal attempts; music audibility measured by band energy.
 - **Live run** (real Whisper + real Gemini) on a 60 s narrated sample → 23–41 s vertical video. Frames inspected: captions bold, readable, inside safe area.
 - **Caption sync measured**: transcribing the rendered audio, 24/24 caption pages matched speech, mean offset −0.01 s (worst 0.37 s).
@@ -49,3 +50,7 @@
 1. Run the app with one or two **real** talking-head MP4s and review the result; tune `WHISPER_MODEL` / `WHISPER_LANGUAGE` (e.g. `tl`) and crop if needed.
 2. Add a real music file you may use to `storage/music/`.
 3. Commit to git (`git add -A` is safe: secrets, media and tools are ignored).
+
+- Step 3 checked in the browser: playback hops over cut-out gaps exactly where the spec says; dragging a clip edge snapped to a word and shortened the preview 24.6 s → 17.1 s; clicking a transcript sentence split a clip; Apply rendered v3 whose length (14.03 s) matched the preview (14.02 s) and the renderer cut list (14.02 s); the processing screen showed the transcript while the AI was working and a playable preview + timeline while the render was still running.
+- Step 3 not verified: real talking-head footage; very long videos (the whole transcript with word timings is loaded into the browser); touch devices; browsers other than the one built into the app.
+- Preview vs render differences: the preview draws captions/title with browser fonts (Arial-like) and plays the original, so tiny font/pixel differences are expected; cuts and caption timing are identical. Clip order stays chronological.

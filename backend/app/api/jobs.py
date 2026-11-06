@@ -11,6 +11,8 @@ from .. import db, stages
 from ..pipeline.runner import record_initial_version
 from ..pipeline.transcribe import load_transcript
 from ..plan.manual import ManualEditError, apply_manual_edit
+from ..plan.preview import build_spec
+from ..plan.schema import EditingPlan
 from ..plan.text import clean_instructions
 from ..schemas import (
     EditSettings,
@@ -18,6 +20,7 @@ from ..schemas import (
     ResultOut,
     RevisionRequest,
     RevisionStarted,
+    TimelineRequest,
     VideoInfo,
 )
 
@@ -151,7 +154,9 @@ def create_revision(body: RevisionRequest, job_id: str = JOB_ID) -> RevisionStar
         stage = stages.REVISING
     elif body.edit is not None:
         try:
-            plan, description = apply_manual_edit(job["plan_json"], body.edit)
+            plan, description = apply_manual_edit(
+                job["plan_json"], body.edit, float(job["metadata_json"]["duration"])
+            )
         except ManualEditError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if description == "No changes":
@@ -176,3 +181,34 @@ def create_revision(body: RevisionRequest, job_id: str = JOB_ID) -> RevisionStar
     if not db.start_revision(job_id, revision, stage, stages.STAGE_PROGRESS[stage], plan):
         raise HTTPException(status_code=409, detail="Another change is still being applied.")
     return RevisionStarted(version=new_number)
+
+
+@router.post("/{job_id}/timeline")
+def get_timeline(body: TimelineRequest | None = None, job_id: str = JOB_ID) -> dict[str, Any]:
+    """What an edit looks like on the timeline, computed with the renderer's own cut/caption code.
+
+    Available as soon as the plan exists (while the video is still rendering). Nothing is saved:
+    pass `edit` to preview a draft (trimmed clips, other hook text, …) on top of the base plan,
+    which is the job's current plan or the given `version`.
+    """
+    body = body or TimelineRequest()
+    job = get_job_or_404(job_id)
+    if not job.get("transcript_path") or not job.get("metadata_json"):
+        raise HTTPException(status_code=409, detail="The transcript isn't ready yet.")
+    if body.version is not None:
+        row = db.get_version(job_id, body.version)
+        if row is None:
+            raise HTTPException(status_code=404, detail="That version doesn't exist.")
+        base = row["plan_json"]
+    else:
+        base = job.get("plan_json")
+    if not base:
+        raise HTTPException(status_code=409, detail="The editing plan isn't ready yet.")
+
+    meta = job["metadata_json"]
+    if body.edit is not None:
+        try:
+            base, _ = apply_manual_edit(base, body.edit, float(meta["duration"]))
+        except ManualEditError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return build_spec(EditingPlan.model_validate(base), load_transcript(job), meta)

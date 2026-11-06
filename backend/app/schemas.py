@@ -22,14 +22,38 @@ class EditSettings(BaseModel):
 HookColorName = Literal["yellow", "white", "red", "cyan", "green", "pink", "orange"]
 
 
+class ClipEdit(BaseModel):
+    """One clip as drawn on the timeline (source-video seconds)."""
+
+    start: float
+    end: float
+    purpose: Literal["hook", "main_content", "example", "conclusion"] = "main_content"
+    reason: str = Field(default="", max_length=200)
+
+
 class ManualEdit(BaseModel):
-    """Quick hand edits applied to the current version (no AI involved)."""
+    """Hand edits applied to a version (no AI involved)."""
 
     hook_enabled: bool | None = None
     hook_text: str | None = Field(default=None, max_length=200)
     hook_color: HookColorName | None = None
+    hook_duration_s: float | None = Field(default=None, ge=1, le=10)
     captions_enabled: bool | None = None
     remove_clips: list[str] = Field(default_factory=list, max_length=20)
+    clips: list[ClipEdit] | None = Field(default=None, max_length=60, description="The complete new clip list")
+
+    @model_validator(mode="after")
+    def _one_way_to_change_clips(self) -> "ManualEdit":
+        if self.clips is not None and self.remove_clips:
+            raise ValueError("send either clips or remove_clips, not both")
+        return self
+
+
+class TimelineRequest(BaseModel):
+    """Ask what a plan would look like, without saving anything."""
+
+    version: int | None = Field(default=None, ge=1, description="Base version; default: the job's current plan")
+    edit: ManualEdit | None = None
 
 
 class RevisionRequest(BaseModel):
