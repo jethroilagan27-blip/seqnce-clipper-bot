@@ -1,0 +1,28 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# runtime data
+storage/
+
+# local toolchain (downloaded by setup, not source code)
+tools/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# node
+node_modules/
+.next/
+frontend/.env*.local
+
+# os / editors
+.DS_Store
+Thumbs.db
+
+# local test media
+samples/
