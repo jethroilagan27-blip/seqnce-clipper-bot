@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { AuthUser, Quota } from "@/lib/api";
@@ -50,9 +51,7 @@ export default function Shell({ user, onSignOut, wide, section, children }: Prop
   return (
     <main className={`mx-auto w-full flex-1 px-5 py-10 ${wide ? "max-w-5xl" : "max-w-xl"}`}>
       <header className="mb-8 flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-lg font-bold">
-          S
-        </div>
+        <Image src="/logo.png" alt="" width={40} height={40} priority className="h-10 w-10 shrink-0 rounded-xl" />
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold leading-tight">Seqnce</h1>
           <p className="text-sm text-white/50">Turn raw footage into a ready-to-post short.</p>
