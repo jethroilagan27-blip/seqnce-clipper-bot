@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { ReactNode } from "react";
 import type { AuthUser, Quota } from "@/lib/api";
 
@@ -21,10 +22,29 @@ type Props = {
   user: AuthUser | null;
   onSignOut?: () => void;
   wide?: boolean;
+  /** Which mode is open; shows the mode switch. */
+  section?: "video" | "photos";
   children: ReactNode;
 };
 
-export default function Shell({ user, onSignOut, wide, children }: Props) {
+// The mode switch ("Edit with video" / "Edit with photos"). Photo mode is self-contained: to remove it, delete this
+// component and its use below, plus app/photos/ and components/photos/.
+function ModeSwitch({ section }: { section: "video" | "photos" }) {
+  const tab = (on: boolean) =>
+    `rounded-lg px-4 py-2 text-sm ${on ? "bg-violet-600 font-semibold text-white" : "text-white/60 hover:bg-white/5 hover:text-white"}`;
+  return (
+    <nav aria-label="What do you want to edit?" className="mb-6 inline-flex gap-1 rounded-xl bg-white/5 p-1">
+      <Link href="/" aria-current={section === "video" ? "page" : undefined} className={tab(section === "video")}>
+        Edit with video
+      </Link>
+      <Link href="/photos" aria-current={section === "photos" ? "page" : undefined} className={tab(section === "photos")}>
+        Edit with photos
+      </Link>
+    </nav>
+  );
+}
+
+export default function Shell({ user, onSignOut, wide, section, children }: Props) {
   const v = user?.quota.videos;
   const left = v && v.limit !== null ? Math.max(0, v.limit - v.used) : null;
   return (
@@ -57,6 +77,7 @@ export default function Shell({ user, onSignOut, wide, children }: Props) {
           </div>
         )}
       </header>
+      {section && <ModeSwitch section={section} />}
       {children}
     </main>
   );

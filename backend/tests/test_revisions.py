@@ -186,7 +186,8 @@ def test_manual_edit_changes_hook_and_captions_without_ai(client, sample_video, 
     assert job["current_version"] == 2
     v = _versions(client, job_id)["versions"][1]
     assert v["source"] == "manual" and "changed the hook text" in v["message"]
-    assert v["plan"]["hook"] == {"enabled": True, "text": "My own title", "color": "green", "duration_s": 4.0}
+    assert v["plan"]["hook"] == {"enabled": True, "text": "My own title", "color": "green", "duration_s": 4.0,
+                                 "x": None, "y": None}
     assert v["plan"]["captions"]["enabled"] is False
     ass = (get_settings().temp_dir / job_id / "captions.ass").read_text(encoding="utf-8")
     assert "MY OWN TITLE" in ass and "Hello world" not in ass

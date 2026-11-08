@@ -1,12 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import { HOOK_CSS, originalUrl, type TimelineSpec } from "@/lib/api";
+import DraggableBlock from "@/components/overlay/DraggableBlock";
+import OverlayLayer from "@/components/overlay/OverlayLayer";
+import { HOOK_CSS, originalUrl, type Pos, type TimelineSpec } from "@/lib/api";
+import type { TextOverlay } from "@/lib/overlays";
 import { cutIndexAtOut, formatTime, outToSource, pageAt, sourceToOut } from "@/lib/timeline";
 
 export type PreviewHandle = {
   /** Jump to a position of the ORIGINAL video (the preview moves to the nearest kept part). */
   seekSource: (src: number) => void;
+  /** Jump to a position of the FINISHED short. */
+  seekOutput: (seconds: number) => void;
   pause: () => void;
 };
 
@@ -16,12 +21,23 @@ type Props = {
   /** Called while playing / seeking: source time, output time, playing. */
   onTime?: (src: number, out: number, playing: boolean) => void;
   ref?: Ref<PreviewHandle>;
+  /** Draft values that replace what the server's spec says (so dragging is instant). undefined = use the spec. */
+  captionPos?: Pos | null;
+  hookPos?: Pos | null;
+  texts?: TextOverlay[];
+  /** Dragging captions / title / texts is on only when these are given. */
+  onMoveBlock?: (kind: "caption" | "hook", x: number, y: number) => void;
+  selectedTextId?: string | null;
+  onSelectText?: (id: string | null) => void;
+  onMoveText?: (id: string, x: number, y: number) => void;
 };
 
 // Plays the ORIGINAL video in the browser and jumps between the planned cuts. The cut list, caption
 // pages and hook come from the server, computed by the same code that renders the final file, so
 // this shows what the render will contain (minus encoder differences such as exact fonts).
-export default function LivePreview({ jobId, spec, onTime, ref }: Props) {
+export default function LivePreview({
+  jobId, spec, onTime, ref, captionPos, hookPos, texts, onMoveBlock, selectedTextId, onSelectText, onMoveText,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const specRef = useRef(spec);
   const cutRef = useRef(0);
@@ -79,6 +95,7 @@ export default function LivePreview({ jobId, spec, onTime, ref }: Props) {
     ref,
     () => ({
       seekSource: (src: number) => seekOut(sourceToOut(specRef.current.cuts, src), !!videoRef.current && !videoRef.current.paused),
+      seekOutput: (seconds: number) => seekOut(seconds, !!videoRef.current && !videoRef.current.paused),
       pause,
     }),
     [seekOut, pause],
@@ -156,15 +173,21 @@ export default function LivePreview({ jobId, spec, onTime, ref }: Props) {
     paintOrder: "stroke fill",
     fontFamily: "Arial, Helvetica, sans-serif",
     textAlign: "center",
-    position: "absolute",
-    left: "8%",
-    right: "8%",
-    pointerEvents: "none",
   });
+
+  // Dragged positions and free texts: the draft's values when given (instant), otherwise what the server computed.
+  const cPos = captionPos !== undefined ? captionPos : spec.captions_pos;
+  const hPos = hookPos !== undefined ? hookPos : spec.hook.pos;
+  const extraTexts = texts ?? spec.texts;
+  const dragging = !!onMoveBlock;
+  // while editing, captions / title stay grabbable (faded) even when none is on screen at this moment
+  const showHook = hook.enabled && hook.text.trim() !== "" && (hookOn || dragging);
+  const showCaption = spec.captions_enabled && (!!page || dragging);
 
   return (
     <div className="space-y-2">
       <div
+        data-frame
         className="relative mx-auto overflow-hidden rounded-2xl border border-white/10 bg-black"
         style={{ aspectRatio: "9 / 16", width: "min(100%, calc(70vh * 9 / 16))", containerType: "inline-size" }}
       >
@@ -179,26 +202,43 @@ export default function LivePreview({ jobId, spec, onTime, ref }: Props) {
           style={videoStyle}
           aria-label="Live preview of the edit"
         />
-        {hookOn && (
-          <div
+        <OverlayLayer
+          texts={extraTexts}
+          time={t}
+          total={spec.total}
+          selectedId={selectedTextId}
+          onMove={onMoveText}
+          onSelect={onSelectText}
+        />
+        {showHook && (
+          <DraggableBlock
+            pos={hPos}
+            label="Title"
+            onMove={onMoveBlock && ((x, y) => onMoveBlock("hook", x, y))}
+            defaultStyle={{ top: "11.5%", left: "8%", right: "8%" }}
             style={{
               ...stroke(1.2),
-              top: "11.5%",
               fontSize: "10.5cqw",
               fontWeight: 900,
               lineHeight: 1.12,
               textTransform: "uppercase",
               color: HOOK_CSS[hook.color] ?? "#ffe600",
-              opacity: hookOpacity,
+              opacity: hookOn ? hookOpacity : 0.4,
             }}
           >
             {hook.text}
-          </div>
+          </DraggableBlock>
         )}
-        {page && (
-          <div style={{ ...stroke(0.9), bottom: "22%", fontSize: "7cqw", fontWeight: 800, lineHeight: 1.12, color: "#fff" }}>
-            {page.text}
-          </div>
+        {showCaption && (
+          <DraggableBlock
+            pos={cPos}
+            label="Captions"
+            onMove={onMoveBlock && ((x, y) => onMoveBlock("caption", x, y))}
+            defaultStyle={{ bottom: "22%", left: "8%", right: "8%" }}
+            style={{ ...stroke(0.9), fontSize: "7cqw", fontWeight: 800, lineHeight: 1.12, color: "#fff", opacity: page ? 1 : 0.4 }}
+          >
+            {page ? page.text : "Your captions show here"}
+          </DraggableBlock>
         )}
         {failed && (
           <p className="absolute inset-x-4 top-1/2 -translate-y-1/2 rounded-lg bg-black/80 p-3 text-center text-xs text-red-200">

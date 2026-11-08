@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
-from .. import db, stages
+from .. import db, stages, uploadguard
 from ..auth import User, current_user, ensure_no_other_active_job, ensure_quota, media_user, spend_quota
 from ..config import get_settings
 from ..plan.text import clean_instructions
@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 
 CHUNK = 1024 * 1024
+uploadguard.register(r"^/api/videos/upload$", lambda: get_settings().max_upload_bytes + CHUNK)
 ALLOWED_SUFFIXES = {".mp4"}
 
 THUMB_HEIGHTS = (48, 64, 96, 144)  # the only sizes the filmstrip asks for

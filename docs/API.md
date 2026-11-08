@@ -141,3 +141,25 @@ Off by default: with it off every request is served as a built-in local admin wi
 
 ### Admin tool
 `uv run python -m app.admin` (from `backend/`): `invite`, `create-user EMAIL [--admin]`, `users`, `disable|enable EMAIL`, `make-admin EMAIL`, `set-limits`, `reset-password`. Passwords come from a hidden prompt or `SEQNCE_ADMIN_PASSWORD`, never from the command line.
+
+## Photo mode (`/api/slideshows`)
+Turns photos (in order) + optional music + optional text into one MP4. Self-contained in `backend/app/slideshow/`. Same rules as the rest of the API: a login when accounts are on, a project belongs to its creator (someone else's looks missing), uploads are checked before they are read.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/slideshows` | new empty project → `{id}` |
+| GET | `/api/slideshows` / `/{id}` | my projects / one project (settings, photos in order, music, status, progress, output) |
+| DELETE | `/{id}` | delete the project and its files (`409` while rendering) |
+| POST | `/{id}/photos` | multipart `files` (send a few per request). Each is decoded with Pillow (JPG, PNG, WebP, GIF, BMP, HEIC), phone rotation applied, re-saved as a fresh JPEG under a server-made name. `200 {added, rejected:[{name, reason}], photo_count}` — bad files are listed, not fatal |
+| PUT | `/{id}/order` | `{order:[photo ids]}` = the new order; photos left out are **deleted** |
+| PUT | `/{id}/settings` | `size` (vertical 1080×1920 / landscape 1920×1080 / square), `seconds_per_photo` (0.5–15), `fit_music`, `zoom`, `fade`, `fill` (blur / crop / black), `music_volume`, `music_fade_out_s`, `texts[]` |
+| POST / DELETE | `/{id}/music` | multipart `file` (MP3/WAV/M4A/AAC/OGG/FLAC ≤ 60 MB, must contain audio) / remove |
+| POST | `/{id}/render` | queue the render (`202`). Counts as one video against the daily quota. `422` if no photos |
+| GET | `/{id}/photos/{photo_id}/thumb\|preview`, `/{id}/music/file`, `/{id}/video`, `/{id}/download` | files for the browser (`?st=` media token works here) |
+
+Limits: 400 photos per project, 40 MB per photo, 5 projects per user (accounts on), at most 30 minutes of video. The time per photo is rounded to whole frames (30 fps) so long slideshows don't drift. With `fit_music` the time per photo is `music length / photos`, kept between 0.6 and 10 s.
+
+### Free text and dragged positions (photo mode and video mode)
+A text is `{id, text (≤200 chars), x, y, size, color "#rrggbb", style "outline|box|plain", bold, start, end|null, fade}`. `x`/`y` are the **centre** as fractions (0–1) of the frame and `size` is a percentage of the frame width, so the browser preview and the render use the same numbers (line wrapping uses the same character-width estimate in both). Texts are drawn through an ASS file, never a command line, with braces/backslashes neutralised.
+
+In video mode a hand edit (`POST /api/jobs/{id}/revisions` with `{"edit": …}`) can now also carry `texts` (the complete list), `caption_x`+`caption_y`, `hook_x`+`hook_y` (send both coordinates of a pair) and `reset_positions: ["caption","hook"]` (back to the default spot). `POST /api/jobs/{id}/timeline` returns `texts`, `captions_pos` and `hook.pos` for the preview.

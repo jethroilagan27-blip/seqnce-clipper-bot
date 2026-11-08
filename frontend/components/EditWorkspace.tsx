@@ -9,9 +9,12 @@ import {
   type Analysis,
   type ManualEdit,
   type Plan,
+  type Pos,
   type TimelineSpec,
   type Version,
 } from "@/lib/api";
+import TextEditor from "@/components/overlay/TextEditor";
+import type { TextOverlay } from "@/lib/overlays";
 import { clipsEqual, formatTime, toggleRange, type DraftClip, type Range } from "@/lib/timeline";
 import { ChangeChips } from "./RevisionPanel";
 import LivePreview, { type PreviewHandle } from "./LivePreview";
@@ -26,7 +29,13 @@ type Draft = {
   hookColor: string;
   hookDuration: number;
   captions: boolean;
+  captionPos: Pos | null; // dragged position; null = the usual spot
+  hookPos: Pos | null;
+  texts: TextOverlay[]; // your own texts
 };
+
+const asPos = (x?: number | null, y?: number | null): Pos | null => (x != null && y != null ? { x, y } : null);
+const samePos = (a: Pos | null, b: Pos | null) => (!a && !b) || (!!a && !!b && Math.abs(a.x - b.x) < 1e-4 && Math.abs(a.y - b.y) < 1e-4);
 
 function draftFrom(plan: Plan): Draft {
   const hook = plan.hook ?? { enabled: false, text: "", color: "yellow", duration_s: 4 };
@@ -37,6 +46,9 @@ function draftFrom(plan: Plan): Draft {
     hookColor: hook.color,
     hookDuration: hook.duration_s,
     captions: plan.captions?.enabled ?? true,
+    captionPos: asPos(plan.captions?.x, plan.captions?.y),
+    hookPos: asPos(hook.x, hook.y),
+    texts: plan.texts ?? [],
   };
 }
 
@@ -50,7 +62,26 @@ function editFrom(plan: Plan, d: Draft): ManualEdit {
   if (d.hookColor !== base.hookColor) edit.hook_color = d.hookColor;
   if (Math.abs(d.hookDuration - base.hookDuration) > 0.01) edit.hook_duration_s = d.hookDuration;
   if (d.captions !== base.captions) edit.captions_enabled = d.captions;
+  const reset: ("caption" | "hook")[] = [];
+  if (!samePos(d.captionPos, base.captionPos)) {
+    if (d.captionPos) [edit.caption_x, edit.caption_y] = [d.captionPos.x, d.captionPos.y];
+    else reset.push("caption");
+  }
+  if (!samePos(d.hookPos, base.hookPos)) {
+    if (d.hookPos) [edit.hook_x, edit.hook_y] = [d.hookPos.x, d.hookPos.y];
+    else reset.push("hook");
+  }
+  if (reset.length) edit.reset_positions = reset;
+  if (JSON.stringify(d.texts) !== JSON.stringify(base.texts)) edit.texts = d.texts;
   return edit;
+}
+
+/** The part of an edit that changes the cut list or the plan's timing: what the server has to recompute for the
+ *  preview. Positions and texts are drawn locally from the draft, so dragging never waits for the server. */
+function specEdit(edit: ManualEdit): ManualEdit {
+  const copy = { ...edit };
+  for (const key of ["caption_x", "caption_y", "hook_x", "hook_y", "reset_positions", "texts"] as const) delete copy[key];
+  return copy;
 }
 
 type Props = {
@@ -80,9 +111,10 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
   const [working, setWorking] = useState(false);
   const [tab, setTab] = useState<"parts" | "transcript" | "title">("parts");
   const [selected, setSelected] = useState<number | null>(null);
+  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
 
   const edit = editFrom(plan, draft);
-  const editKey = JSON.stringify(edit);
+  const editKey = JSON.stringify(specEdit(edit)); // what the server must recompute for the preview
   const dirty = Object.keys(edit).length > 0;
 
   useEffect(() => {
@@ -144,6 +176,22 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
     if (err) setError(err);
   }
 
+  // dragging in the preview: the captions / title / one of your texts moved
+  function moveBlock(kind: "caption" | "hook", x: number, y: number) {
+    change(kind === "caption" ? { captionPos: { x, y } } : { hookPos: { x, y } });
+  }
+  function moveText(id: string, x: number, y: number) {
+    setDraft((d) => ({ ...d, texts: d.texts.map((t) => (t.id === id ? { ...t, x, y } : t)) }));
+  }
+  function selectText(id: string | null) {
+    setSelectedTextId(id);
+    const t = id ? draft.texts.find((x) => x.id === id) : null;
+    if (t) {
+      setMode("preview");
+      previewRef.current?.seekOutput(t.start + 0.05); // jump to where this text shows
+    }
+  }
+
   const changedAreas = [
     edit.clips && "parts",
     (edit.hook_enabled !== undefined ||
@@ -152,6 +200,8 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
       edit.hook_duration_s !== undefined) &&
       "title",
     edit.captions_enabled !== undefined && "captions",
+    (edit.caption_x !== undefined || edit.hook_x !== undefined || edit.reset_positions) && "positions",
+    edit.texts && "text",
   ].filter(Boolean) as string[];
 
   const locked = !editable || working;
@@ -207,7 +257,19 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
 
           <div className={mode === "preview" ? "" : "hidden"}>
             {spec ? (
-              <LivePreview ref={previewRef} jobId={jobId} spec={spec} onTime={(src) => setPlayhead(src)} />
+              <LivePreview
+                ref={previewRef}
+                jobId={jobId}
+                spec={spec}
+                onTime={(src) => setPlayhead(src)}
+                captionPos={draft.captionPos}
+                hookPos={draft.hookPos}
+                texts={draft.texts}
+                selectedTextId={selectedTextId}
+                onSelectText={selectText}
+                onMoveBlock={editable ? moveBlock : undefined}
+                onMoveText={editable ? moveText : undefined}
+              />
             ) : (
               <p className="py-16 text-center text-sm text-white/50">{specError ?? "Loading preview…"}</p>
             )}
@@ -406,6 +468,42 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
                 onChange={(e) => change({ captions: e.target.checked })}
               />
             </label>
+
+            <div className="space-y-2 border-t border-white/10 pt-4">
+              <p className="font-medium">Move things around</p>
+              <p className="text-xs text-white/50">
+                Open the <span className="text-white/70">Live preview</span> and drag the captions or the title wherever you like.
+                They snap to the middle. Use the buttons to put them back.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  disabled={locked || !draft.captionPos}
+                  onClick={() => change({ captionPos: null })}
+                  className="rounded-lg border border-white/15 px-3 py-1.5 text-xs hover:bg-white/5 disabled:opacity-40"
+                >
+                  Captions back to the usual place
+                </button>
+                <button
+                  disabled={locked || !draft.hookPos}
+                  onClick={() => change({ hookPos: null })}
+                  className="rounded-lg border border-white/15 px-3 py-1.5 text-xs hover:bg-white/5 disabled:opacity-40"
+                >
+                  Title back to the usual place
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2 border-t border-white/10 pt-4">
+              <p className="font-medium">Your own text</p>
+              <TextEditor
+                texts={draft.texts}
+                selectedId={selectedTextId}
+                total={Math.max(spec?.total ?? kept, 1)}
+                disabled={locked}
+                onChange={(next) => change({ texts: next })}
+                onSelect={selectText}
+              />
+            </div>
           </div>
         )}
 

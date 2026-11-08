@@ -14,9 +14,11 @@ Upload an MP4. Seqnce transcribes it on your computer, asks an AI which parts ar
 - **Chat revisions:** "cut the intro", "make it 20 seconds". Each change becomes a numbered **version**, with a diff showing which parts were added, removed or trimmed. Go back to any version instantly.
 - **Edit by hand:** a map of your whole video made of real frames, a list of numbered parts, a zoomed filmstrip to trim each one (handles snap to words), transcript click-to-cut, and title/captions controls.
 - **Live preview:** the browser plays your original video as the edit (cuts, crop, captions, title) before anything is rendered. The preview uses the same cut list as the renderer.
+- **Photo mode** (`/photos`, the "Edit with photos" tab): drop in as many photos as you like (JPG, PNG, WebP, iPhone HEIC), put them in order (drag, or sort by name / date taken), add your own music, pick the shape (9:16, 16:9, 1:1), and get a video with slow zoom and quick fades. "Fit to music" works out the time per photo so the video is exactly as long as the song. A 3½-minute video from 150 phone photos took about 2 minutes on a 12-core laptop.
+- **Your own text, draggable:** add titles in either mode and drag them on the preview; the auto captions and the title can be dragged too. What you place is what gets rendered.
 - **Live progress:** while it works you watch the transcript appear, then the AI's chosen parts, and can play the preview before the final render finishes.
 
-## How it works
+## How it works (video mode)
 
 ```
 upload ─► prepare ─► transcribe ─► look at frames ─► AI plan ─► validate ─► FFmpeg render ─► result
@@ -158,3 +160,6 @@ Issues and pull requests are welcome. Please run the tests above before opening 
 ## License
 
 [MIT](LICENSE) © 2026 Jethro Ilagan. FFmpeg, faster-whisper and the other dependencies have their own licenses; FFmpeg is installed separately and is not distributed with this repository.
+
+## Removing photo mode
+Photo mode is deliberately self-contained. To remove it: delete `backend/app/slideshow/` and `backend/tests/test_slideshow.py`, delete the lines marked `# photo mode` in `backend/app/main.py`, delete `frontend/app/photos/` and `frontend/components/photos/`, and remove the mode switch in `frontend/components/Shell.tsx`. (The shared text overlay code in `backend/app/editing/overlays.py` is also used by video mode and stays.)

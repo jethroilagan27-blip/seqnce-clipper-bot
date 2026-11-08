@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 from .cuts import Cut
+from .overlays import TextOverlay, ass_text_lines
 
 SENTENCE_END = re.compile(r"[.!?…]$")
 MAX_GAP_S = 0.6  # a pause longer than this starts a new caption page
@@ -86,6 +87,8 @@ ScaledBorderAndShadow: yes
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
 Style: Default,Arial,{size},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,2,2,{mx},{mx},{mv},1
 Style: Hook,Arial Black,{hsize},{hcolor},&H000000FF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,{houtline},{hshadow},8,{mx},{mx},{hmv},1
+Style: TextOutline,Arial,60,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,4,1,5,0,0,0,1
+Style: TextBox,Arial,60,&H00FFFFFF,&H000000FF,&H99000000,&H99000000,-1,0,0,0,100,100,0,0,3,8,0,5,0,0,0,1
 
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
@@ -113,28 +116,41 @@ class HookTitle:
     duration_s: float = 4.0
 
 
+def _pos_tag(pos: tuple[float, float] | None, width: int, height: int) -> str:
+    """Centre a block on a dragged position (fractions of the frame); '' keeps the default style position."""
+    return f"\\an5\\pos({pos[0] * width:.0f},{pos[1] * height:.0f})" if pos else ""
+
+
 def render_ass(
     pages: Sequence[Page],
     width: int = 1080,
     height: int = 1920,
     hook: HookTitle | None = None,
     total: float | None = None,
+    texts: Sequence[TextOverlay] | None = None,
+    caption_pos: tuple[float, float] | None = None,
+    hook_pos: tuple[float, float] | None = None,
 ) -> str:
     """Safe area: 8 % side margins; captions sit above the TikTok/Reels bottom UI and the
-    hook sits below the top bar, in the upper part of the frame."""
+    hook sits below the top bar, in the upper part of the frame. A dragged position replaces
+    the default one for captions / hook; `texts` are free text placed by the user."""
     header = ASS_HEADER.format(
         w=width, h=height, size=round(width * 0.07), mx=round(width * 0.08), mv=round(height * 0.22),
         hsize=round(width * 0.105), hcolor=HOOK_ASS_COLORS.get(hook.color if hook else "yellow", HOOK_ASS_COLORS["yellow"]),
         houtline=round(width * 0.011), hshadow=round(width * 0.004), hmv=round(height * 0.115),
     )
+    cap_tag = _pos_tag(caption_pos, width, height)
+    cap_prefix = "{" + cap_tag + "}" if cap_tag else ""
     lines = [
-        f"Dialogue: 0,{_ts(p.start)},{_ts(p.end)},Default,,0,0,0,,{_escape(p.text)}"
+        f"Dialogue: 0,{_ts(p.start)},{_ts(p.end)},Default,,0,0,0,,{cap_prefix}{_escape(p.text)}"
         for p in pages
     ]
     if hook and hook.text.strip():
         end = hook.duration_s if total is None else min(hook.duration_s, total)
         lines.append(
             f"Dialogue: 1,{_ts(0)},{_ts(end)},Hook,,0,0,0,,"
-            f"{{\\fad({HOOK_FADE_IN_MS},{HOOK_FADE_OUT_MS})}}{_escape(hook.text.upper())}"
+            f"{{{_pos_tag(hook_pos, width, height)}\\fad({HOOK_FADE_IN_MS},{HOOK_FADE_OUT_MS})}}{_escape(hook.text.upper())}"
         )
+    if texts:
+        lines.extend(ass_text_lines(texts, width, height, total if total is not None else 1e9))
     return header + "\n".join(lines) + "\n"

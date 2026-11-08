@@ -72,15 +72,22 @@ def run(job: dict[str, Any]) -> None:
             warnings.append("No caption text could be aligned; captions skipped.")
 
     hook_on = plan.hook.enabled and bool(plan.hook.text.strip())
-    if captions_on or hook_on:
+    texts_on = bool(plan.texts)
+    if captions_on or hook_on or texts_on:
         title = cap.HookTitle(plan.hook.text, plan.hook.color, plan.hook.duration_s) if hook_on else None
+        cap_pos = (plan.captions.x, plan.captions.y) if plan.captions.x is not None and plan.captions.y is not None else None
+        hook_pos = (plan.hook.x, plan.hook.y) if plan.hook.x is not None and plan.hook.y is not None else None
         (work / ASS_NAME).write_text(
-            cap.render_ass(pages, OUT_W, OUT_H, hook=title, total=total), encoding="utf-8"
+            cap.render_ass(
+                pages, OUT_W, OUT_H, hook=title, total=total,
+                texts=plan.texts, caption_pos=cap_pos, hook_pos=hook_pos,
+            ),
+            encoding="utf-8",
         )
 
     crop = compute_crop(int(meta["width"]), int(meta["height"]), plan.reframe.focus_x)
     graph = build_filtergraph(
-        cuts, crop, captions=captions_on or hook_on, music=music is not None,
+        cuts, crop, captions=captions_on or hook_on or texts_on, music=music is not None,
         music_volume=plan.music.volume, total=total,
     )
     (work / "filter.txt").write_text(graph, encoding="utf-8")

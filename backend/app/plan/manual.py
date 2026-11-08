@@ -83,6 +83,26 @@ def apply_manual_edit(
         new["captions"]["enabled"] = edit.captions_enabled
         parts.append("turned captions " + ("on" if edit.captions_enabled else "off"))
 
+    # Dragged positions: a block moves only when both coordinates arrive; "reset" puts it back.
+    for name, box, x, y in (
+        ("caption", new["captions"], edit.caption_x, edit.caption_y),
+        ("hook", hook, edit.hook_x, edit.hook_y),
+    ):
+        if (x is None) != (y is None):
+            raise ManualEditError(f"Send both the horizontal and vertical position of the {name}.")
+        if name in edit.reset_positions and (box.get("x") is not None or box.get("y") is not None):
+            box["x"] = box["y"] = None
+            parts.append(f"moved the {name} back to its usual spot")
+        elif x is not None and y is not None and (box.get("x"), box.get("y")) != (round(x, 4), round(y, 4)):
+            box["x"], box["y"] = round(x, 4), round(y, 4)
+            parts.append(f"moved the {name}")
+
+    if edit.texts is not None:
+        old = new.get("texts", [])
+        new["texts"] = [t.model_dump() for t in edit.texts]
+        if new["texts"] != old:
+            parts.append(f"edited the text ({len(old)} → {len(new['texts'])})" if len(old) != len(new["texts"]) else "edited the text")
+
     new["warnings"] = []  # warnings described the previous build; the editor adds fresh ones
     EditingPlan.model_validate(new)  # last line of defence
     return new, ("Edited by hand: " + ", ".join(parts)) if parts else "No changes"

@@ -149,7 +149,7 @@ function Studio({ account }: { account: AccountInfo }) {
   const view = result ? "result" : jobId ? "processing" : "upload";
 
   return (
-    <Shell user={account.user} onSignOut={account.user ? account.signOut : undefined} wide={view === "result"}>
+    <Shell user={account.user} onSignOut={account.user ? account.signOut : undefined} wide={view === "result"} section="video">
       {view === "upload" && (
         <UploadCard
           busy={uploadProgress !== null}

@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from .editing.overlays import MAX_TEXTS, TextOverlay
+
 
 class EditSettings(BaseModel):
     """User-selected editing preferences, stored with the job."""
@@ -39,6 +41,13 @@ class ManualEdit(BaseModel):
     hook_color: HookColorName | None = None
     hook_duration_s: float | None = Field(default=None, ge=1, le=10)
     captions_enabled: bool | None = None
+    # Dragged positions (centre of the block, fractions of the frame). Send both x and y of a pair.
+    caption_x: float | None = Field(default=None, ge=0, le=1)
+    caption_y: float | None = Field(default=None, ge=0, le=1)
+    hook_x: float | None = Field(default=None, ge=0, le=1)
+    hook_y: float | None = Field(default=None, ge=0, le=1)
+    reset_positions: list[Literal["caption", "hook"]] = Field(default_factory=list)  # back to the default spot
+    texts: list[TextOverlay] | None = Field(default=None, max_length=MAX_TEXTS, description="The complete list of free texts")
     remove_clips: list[str] = Field(default_factory=list, max_length=20)
     clips: list[ClipEdit] | None = Field(default=None, max_length=60, description="The complete new clip list")
 

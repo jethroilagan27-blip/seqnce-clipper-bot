@@ -64,7 +64,8 @@ def test_ai_hook_and_instructions_flow_into_plan_and_render(client: TestClient, 
     assert _wait_done(client, job_id)["status"] == "completed"
 
     plan = _plan(client, job_id)
-    assert plan["hook"] == {"enabled": True, "text": "Nobody tells you this", "color": "cyan", "duration_s": 4.0}
+    assert plan["hook"] == {"enabled": True, "text": "Nobody tells you this", "color": "cyan", "duration_s": 4.0,
+                            "x": None, "y": None}  # not dragged anywhere: default spot
     assert plan["instructions"] == "make it punchy"
 
     prompt = next(c["prompt"] for c in fake_provider.calls if c["model"] == "PlanProposal")

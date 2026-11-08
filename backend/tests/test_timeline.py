@@ -71,7 +71,8 @@ def test_spec_maps_output_time_and_captions_and_hook():
         spec["cuts"][0]["end"] - spec["cuts"][0]["start"], abs=0.01)
     assert spec["total"] == pytest.approx(sum(c["end"] - c["start"] for c in spec["cuts"]), abs=0.01)
     assert spec["pages"] and all(0 <= p["start"] < p["end"] <= spec["total"] + 0.5 for p in spec["pages"])
-    assert spec["hook"] == {"enabled": True, "text": "Big title", "color": "red", "duration_s": 4.0}
+    assert spec["hook"] == {"enabled": True, "text": "Big title", "color": "red", "duration_s": 4.0, "pos": None}
+    assert spec["captions_pos"] is None and spec["texts"] == []
     assert spec["source"] == {"width": 1280, "height": 720, "duration": 20.0}
     assert spec["reframe"]["focus_x"] == 0.5
 

@@ -1,6 +1,8 @@
 // Thin client for the FastAPI backend. The browser talks to it directly (CORS is
 // enabled for localhost:3000) so large uploads don't pass through the Next server.
 
+import type { TextOverlay } from "./overlays";
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 export const MAX_UPLOAD_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? 500);
 
@@ -63,7 +65,8 @@ export type PlanClip = {
   reason: string;
 };
 
-export type Hook = { enabled: boolean; text: string; color: string; duration_s: number };
+export type Pos = { x: number; y: number };
+export type Hook = { enabled: boolean; text: string; color: string; duration_s: number; x?: number | null; y?: number | null };
 
 export type Plan = {
   source: "ai" | "fallback";
@@ -72,7 +75,8 @@ export type Plan = {
   target_duration: number;
   clips: PlanClip[];
   hook?: Hook;
-  captions?: { enabled: boolean };
+  captions?: { enabled: boolean; x?: number | null; y?: number | null };
+  texts?: TextOverlay[];
   instructions?: string;
   warnings: string[];
 };
@@ -109,6 +113,12 @@ export type ManualEdit = {
   hook_color?: string;
   hook_duration_s?: number;
   captions_enabled?: boolean;
+  caption_x?: number;
+  caption_y?: number;
+  hook_x?: number;
+  hook_y?: number;
+  reset_positions?: ("caption" | "hook")[];
+  texts?: TextOverlay[];
   remove_clips?: string[];
   clips?: { start: number; end: number; purpose: PlanClip["purpose"]; reason: string }[];
 };
@@ -119,7 +129,9 @@ export type TimelineSpec = {
   cuts: { start: number; end: number; out_start: number }[];
   pages: { start: number; end: number; text: string }[];
   captions_enabled: boolean;
-  hook: { enabled: boolean; text: string; color: string; duration_s: number };
+  captions_pos: Pos | null;
+  texts: TextOverlay[];
+  hook: { enabled: boolean; text: string; color: string; duration_s: number; pos: Pos | null };
   reframe: { strategy: string; focus_x: number };
   source: { width: number; height: number; duration: number };
   clips: PlanClip[];
@@ -161,7 +173,7 @@ export type Analysis = {
 
 export class ApiError extends Error {}
 
-function errorMessage(body: unknown, fallback: string): string {
+export function errorMessage(body: unknown, fallback: string): string {
   const detail = (body as { detail?: unknown } | null)?.detail;
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail) && detail.length > 0) return "Invalid request.";
@@ -201,6 +213,9 @@ export function setAuthToken(token: string | null) {
   if (!token) mediaToken = null;
 }
 
+/** The session token, for code that must send its own request (e.g. uploads with progress). */
+export const currentAuthToken = () => authToken;
+
 export const setMediaToken = (token: string | null) => {
   mediaToken = token;
 };
@@ -215,7 +230,7 @@ export function mediaUrl(path: string): string {
   return mediaToken ? `${url}${path.includes("?") ? "&" : "?"}st=${encodeURIComponent(mediaToken)}` : url;
 }
 
-async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+export async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
   let res: Response;

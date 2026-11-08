@@ -88,7 +88,8 @@ def test_every_api_route_needs_a_login(ac: TestClient):
         if not path.startswith("/api/") or path in OPEN_ROUTES:
             continue
         for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
-            url = path.replace("{job_id}", "0" * 32)
+            url = (path.replace("{job_id}", "0" * 32).replace("{project_id}", "0" * 32)
+                   .replace("{photo_id}", "0" * 16).replace("{kind}", "thumb"))
             r = ac.request(method, url, json={} if method == "POST" else None)
             assert r.status_code == 401, f"{method} {path} answered {r.status_code} without a login"
             checked += 1

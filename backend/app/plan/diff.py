@@ -72,6 +72,14 @@ def _settings_changes(old: dict[str, Any], new: dict[str, Any]) -> list[dict[str
     ncap = bool((new.get("captions") or {}).get("enabled"))
     if ocap != ncap:
         out.append({"field": "Captions", "before": "on" if ocap else "off", "after": "on" if ncap else "off"})
+    for label, key in (("Caption position", "captions"), ("Hook position", "hook")):
+        before, after = (old.get(key) or {}), (new.get(key) or {})
+        if (before.get("x"), before.get("y")) != (after.get("x"), after.get("y")):
+            out.append({"field": label, "before": "moved" if before.get("x") is not None else "default",
+                        "after": "moved" if after.get("x") is not None else "default"})
+    if len(old.get("texts") or []) != len(new.get("texts") or []) or (old.get("texts") or []) != (new.get("texts") or []):
+        out.append({"field": "Text", "before": f"{len(old.get('texts') or [])} added",
+                    "after": f"{len(new.get('texts') or [])} added"})
     if old.get("target_duration") != new.get("target_duration"):
         out.append({
             "field": "Target length",

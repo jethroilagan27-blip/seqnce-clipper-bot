@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..editing.overlays import MAX_TEXTS, TextOverlay
+
 Purpose = Literal["hook", "main_content", "example", "conclusion"]
 
 
@@ -46,6 +48,9 @@ class Captions(BaseModel):
     enabled: bool = True
     max_words_per_line: int = Field(default=4, ge=1, le=8)
     max_lines: int = Field(default=2, ge=1, le=3)
+    # Where the user dragged the caption block (centre, fractions of the frame). None = the default spot.
+    x: float | None = Field(default=None, ge=0, le=1)
+    y: float | None = Field(default=None, ge=0, le=1)
 
 
 class Silence(BaseModel):
@@ -64,6 +69,8 @@ class Hook(BaseModel):
     text: str = Field(default="", max_length=80)
     color: HookColor = "yellow"
     duration_s: float = Field(default=4.0, ge=1, le=10)
+    x: float | None = Field(default=None, ge=0, le=1)  # dragged position (centre); None = default
+    y: float | None = Field(default=None, ge=0, le=1)
 
 
 class Music(BaseModel):
@@ -85,6 +92,7 @@ class EditingPlan(BaseModel):
     silence: Silence = Field(default_factory=Silence)
     music: Music = Field(default_factory=Music)
     hook: Hook = Field(default_factory=Hook)
+    texts: list[TextOverlay] = Field(default_factory=list, max_length=MAX_TEXTS)  # free text the user placed
     instructions: str = ""  # the user's free-text request, echoed back in the UI
     warnings: list[str] = Field(default_factory=list)
 
