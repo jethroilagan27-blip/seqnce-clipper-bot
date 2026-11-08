@@ -115,6 +115,8 @@ uv run python -m app.admin invite --email friend@example.com     # prints a one-
 uv run python -m app.admin users                                  # who has used what today
 ```
 
+To let anyone create an account themselves (email, password and confirm password, no invite code), add `OPEN_SIGNUP=true`. There is no email check, so new accounts are capped: `SIGNUP_PER_IP_PER_HOUR=5` per visitor and `SIGNUP_DAILY_CAP=50` for the whole server per day. Each new account still gets only the daily limits above.
+
 With accounts on, nobody can reach any video without signing in, users only ever see their own jobs, uploads are refused before the file is read if you're not signed in, and each user is limited to a few videos and AI chat messages per day and one video at a time. Details: [docs/API.md](docs/API.md#accounts-ownership-and-quotas-auth_enabledtrue).
 
 This does **not** make the server safe to put on the open internet by itself: serve it over HTTPS (for example through a Cloudflare Tunnel or a reverse proxy), keep `CORS_ORIGINS` set to your real site only, and remember that your Gemini key pays for everyone's AI calls.

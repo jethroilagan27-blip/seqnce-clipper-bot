@@ -258,7 +258,7 @@ async function postAuth<T>(path: string, body: unknown): Promise<T> {
   return data as T;
 }
 
-export async function getHealth(): Promise<{ status: string; ffmpeg: boolean; auth_required: boolean }> {
+export async function getHealth(): Promise<{ status: string; ffmpeg: boolean; auth_required: boolean; signup_open?: boolean }> {
   const res = await authedFetch("/api/health");
   if (!res.ok) throw new ApiError(`The server answered HTTP ${res.status}.`);
   return res.json();

@@ -30,7 +30,7 @@ def _wait_done(client: TestClient, job_id: str, timeout: float = 30) -> dict:
 def test_health(client: TestClient):
     r = client.get("/api/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "ffmpeg": True, "auth_required": False}  # local use: no login
+    assert r.json() == {"status": "ok", "ffmpeg": True, "auth_required": False, "signup_open": False}  # local use: no login
 
 
 def test_upload_and_prepare(client: TestClient, sample_video: Path):

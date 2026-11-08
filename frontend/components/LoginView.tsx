@@ -3,14 +3,15 @@
 import { useState } from "react";
 import { ApiError, login, signup, type Session } from "@/lib/api";
 
-type Props = { onSession: (s: Session) => void; notice?: string | null };
+type Props = { onSession: (s: Session) => void; notice?: string | null; openSignup?: boolean };
 
-// Sign in, or create an account with an invite code. Sign-up is invite-only: the code comes from
-// whoever runs the server (`python -m app.admin invite`).
-export default function LoginView({ onSession, notice }: Props) {
+// Sign in, or create an account. When the server has OPEN_SIGNUP on, anyone can join with an email and a
+// password; otherwise sign-up needs an invite code from whoever runs the server (`python -m app.admin invite`).
+export default function LoginView({ onSession, notice, openSignup = false }: Props) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,10 +19,14 @@ export default function LoginView({ onSession, notice }: Props) {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
+    if (mode === "signup" && password !== confirm) {
+      setError("The two passwords don't match.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      onSession(mode === "signin" ? await login(email, password) : await signup(code, email, password));
+      onSession(mode === "signin" ? await login(email, password) : await signup(openSignup ? "" : code, email, password));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
       setBusy(false);
@@ -43,6 +48,7 @@ export default function LoginView({ onSession, notice }: Props) {
             onClick={() => {
               setMode(m);
               setError(null);
+              setConfirm("");
             }}
             className={`rounded-lg px-3 py-2 ${mode === m ? "bg-violet-600 font-semibold text-white" : "text-white/60 hover:text-white"}`}
           >
@@ -54,7 +60,7 @@ export default function LoginView({ onSession, notice }: Props) {
       {notice && <p className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">{notice}</p>}
 
       <form onSubmit={submit} className="space-y-3">
-        {mode === "signup" && (
+        {mode === "signup" && !openSignup && (
           <div>
             <label htmlFor="invite" className="mb-1 block text-xs text-white/60">
               Invite code
@@ -102,6 +108,23 @@ export default function LoginView({ onSession, notice }: Props) {
             className={input}
           />
         </div>
+        {mode === "signup" && (
+          <div>
+            <label htmlFor="confirm" className="mb-1 block text-xs text-white/60">
+              Confirm password
+            </label>
+            <input
+              id="confirm"
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              required
+              disabled={busy}
+              className={input}
+            />
+          </div>
+        )}
 
         {error && (
           <p role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
@@ -120,7 +143,9 @@ export default function LoginView({ onSession, notice }: Props) {
 
       <p className="text-center text-xs text-white/40">
         {mode === "signin"
-          ? "Seqnce is invite-only for now. Ask for an invite code, then choose “Create account”."
+          ? openSignup
+            ? "New here? Choose “Create account”: just an email and a password."
+            : "Seqnce is invite-only for now. Ask for an invite code, then choose “Create account”."
           : "Only the email, a password hash and your own videos are stored. Videos are deleted automatically after a few days."}
       </p>
     </div>

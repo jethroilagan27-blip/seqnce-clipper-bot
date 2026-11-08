@@ -215,6 +215,8 @@ def clear_login_failures(email: str) -> None:
 def reset_throttle() -> None:  # for tests
     with _fails_lock:
         _fails.clear()
+    with _signups_lock:
+        _signups.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -233,13 +235,52 @@ def new_invite(email: str | None = None, days: int = 7) -> str:
     return code
 
 
-def signup(invite_code: str, email_raw: str, password: str) -> dict[str, Any]:
+_signups: dict[str, deque[float]] = defaultdict(deque)  # open sign-up: when each address made an account
+_signups_lock = threading.Lock()
+
+
+def client_ip(request: Request) -> str:
+    """The visitor's address. Behind the Cloudflare tunnel every request comes from localhost, and the
+    real address is in CF-Connecting-IP (Cloudflare sets it; the backend only listens on localhost)."""
+    host = request.client.host if request.client else "?"
+    forwarded = request.headers.get("cf-connecting-ip", "").strip()
+    return forwarded[:64] if forwarded and host in ("127.0.0.1", "::1", "localhost") else host
+
+
+def _signup_allowed(ip: str) -> bool:
+    """Record one sign-up for this address unless it already made too many in the last hour."""
+    limit = get_settings().signup_per_ip_per_hour
+    now = time.time()
+    with _signups_lock:
+        q = _signups[ip]
+        while q and now - q[0] > 3600:
+            q.popleft()
+        if len(q) >= limit:
+            return False
+        q.append(now)
+        if len(_signups) > 5000:  # never grow without bound
+            for k in [k for k, v in _signups.items() if not v or now - v[-1] > 3600]:
+                del _signups[k]
+        return True
+
+
+def signup(invite_code: str, email_raw: str, password: str, ip: str = "?") -> dict[str, Any]:
     email = normalize_email(email_raw)
     if email is None:
         raise HTTPException(status_code=422, detail="That doesn't look like an email address.")
     problem = password_problem(password, email)
     if problem:
         raise HTTPException(status_code=422, detail=problem)
+    cfg = get_settings()
+    if cfg.open_signup:  # anyone may join: no invite needed, but the server and each address have a cap
+        if not _signup_allowed(ip):
+            raise HTTPException(status_code=429, detail="Too many accounts were created from your connection. Try again in an hour.")
+        status, user_id = db.create_user_open(email, hash_password(password), cfg.signup_daily_cap)
+        if status == "full":
+            raise HTTPException(status_code=503, detail="Sign-ups are paused for today because many people joined. Please try again tomorrow.")
+        if status == "exists" or user_id is None:
+            raise HTTPException(status_code=409, detail="An account with that email already exists. Try signing in.")
+        return db.get_user(user_id) or {}
     status, user_id = db.create_user_with_invite(_sha(normalize_code(invite_code)), email, hash_password(password))
     if status == "invalid":
         raise HTTPException(status_code=400, detail="That invite code isn't valid for this email, or it has expired.")

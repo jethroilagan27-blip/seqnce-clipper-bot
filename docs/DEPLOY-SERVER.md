@@ -85,6 +85,7 @@ Paste this, put your real Gemini key after `GEMINI_API_KEY=`, then Ctrl+O, Enter
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.5-flash
 AUTH_ENABLED=true
+OPEN_SIGNUP=true
 CORS_ORIGINS=https://seqnce.orbitrixhq.com
 MAX_UPLOAD_MB=95
 RETENTION_DAYS=7

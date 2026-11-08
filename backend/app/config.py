@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     daily_video_limit: int = 3  # uploads per rolling 24 h for a normal user (admins: unlimited)
     daily_chat_limit: int = 20  # AI chat messages per rolling 24 h for a normal user
     max_active_jobs_per_user: int = 1  # videos a user may have queued/processing at once
+    open_signup: bool = False  # True = anyone can create an account (no invite code); False = invite only
+    signup_daily_cap: int = 50  # open sign-up only: most new accounts per rolling 24 h on the whole server
+    signup_per_ip_per_hour: int = 5  # open sign-up only: most new accounts one visitor can make per hour
 
     # --- AI (used from Day 3 onwards) --------------------------------------
     gemini_api_key: str = ""

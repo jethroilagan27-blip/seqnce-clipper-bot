@@ -18,7 +18,9 @@ echo Make sure the normal dev servers (scripts\dev-*.cmd, ports 3000 and 8000) a
 echo.
 
 rem 1) backend: accounts on, only the public site may call it, uploads kept under Cloudflare's 100 MB limit
-start "Seqnce backend (public)" cmd /k "set AUTH_ENABLED=true&& set CORS_ORIGINS=%PUBLIC_APP%&& set MAX_UPLOAD_MB=95&& cd backend&& ..\tools\uv\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8000"
+rem    OPEN_SIGNUP=true lets anyone create an account (email + password, no invite code; capped per visitor and per day).
+rem    Set it to false to go back to invite-only (invite codes: python -m app.admin invite).
+start "Seqnce backend (public)" cmd /k "set AUTH_ENABLED=true&& set OPEN_SIGNUP=true&& set CORS_ORIGINS=%PUBLIC_APP%&& set MAX_UPLOAD_MB=95&& cd backend&& ..\tools\uv\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8000"
 
 rem 2) website: built for the public address, then served
 start "Seqnce website (public)" cmd /k "cd frontend&& set NEXT_PUBLIC_API_URL=%PUBLIC_API%&& set NEXT_PUBLIC_MAX_UPLOAD_MB=95&& npm run build&& npm run start -- -p 3000"

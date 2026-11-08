@@ -113,13 +113,13 @@ One small JPEG frame of the **original** video, for filmstrips. `t` = seconds (0
 Off by default: with it off every request is served as a built-in local admin with no limits, `/api/auth/login|signup` return `404`, and nothing below applies. With it on:
 
 - **Everything under `/api/` except `/api/health`, `/api/auth/signup` and `/api/auth/login` needs `Authorization: Bearer <token>`** (`401` otherwise). The interactive docs (`/docs`, `/openapi.json`) are switched off.
-- **Sign-up is invite-only.** An admin creates a one-time code with `uv run python -m app.admin invite [--email x] [--days 7]`; only its hash is stored.
+- **Sign-up is invite-only** unless `OPEN_SIGNUP=true`. An admin creates a one-time code with `uv run python -m app.admin invite [--email x] [--days 7]`; only its hash is stored. With `OPEN_SIGNUP=true` the code is not needed (and ignored if sent): `/api/health` then reports `signup_open: true`, each visitor can make `SIGNUP_PER_IP_PER_HOUR` accounts per hour (`429`), and the whole server takes at most `SIGNUP_DAILY_CAP` new accounts per 24 h (`503`).
 - **Ownership:** a job belongs to the user who uploaded it. Someone else's job answers `404`, exactly like a job that doesn't exist. Admins can open any job; jobs from before accounts existed are admin-only.
 - **Passwords** are scrypt hashes (min. 10 characters). Sessions and invite codes are stored only as SHA-256 hashes. Sign-in is throttled (5 failures per email and 30 per address per 15 minutes → `429`, in memory), and failures never reveal whether an email exists.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/auth/signup` | `{invite_code, email, password}` → `201 {token, media_token, user}` |
+| POST | `/api/auth/signup` | `{invite_code?, email, password}` (`invite_code` only when sign-up is not open) → `201 {token, media_token, user}` |
 | POST | `/api/auth/login` | `{email, password}` → `{token, media_token, user}` |
 | POST | `/api/auth/logout` | ends this session (`204`) |
 | GET | `/api/auth/me` | `{auth_required, user, media_token}`; call it hourly to renew the media token |

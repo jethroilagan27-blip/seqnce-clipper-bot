@@ -146,6 +146,75 @@ def test_signup_rules(ac: TestClient):
     assert ac.post(url, json={"invite_code": expired, "email": "c@example.com", "password": PASSWORD}).status_code == 400
 
 
+# ---------- open sign-up (OPEN_SIGNUP=true): email + password, no invite ----------
+
+@pytest.fixture
+def oc(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> TestClient:
+    monkeypatch.setenv("OPEN_SIGNUP", "true")
+    return request.getfixturevalue("ac")
+
+
+def _open_join(c: TestClient, email: str, password: str = PASSWORD, **extra):
+    return c.post("/api/auth/signup", json={"email": email, "password": password, **extra})
+
+
+def test_signup_needs_an_invite_unless_open(ac: TestClient):
+    assert ac.get("/api/health").json()["signup_open"] is False
+    assert _open_join(ac, "a@example.com").status_code == 400  # no code, closed sign-up
+    assert _open_join(ac, "a@example.com", invite_code="").status_code == 400
+
+
+def test_open_signup_creates_an_account_without_a_code(oc: TestClient):
+    assert oc.get("/api/health").json()["signup_open"] is True
+    r = _open_join(oc, " New@Example.com ")
+    assert r.status_code == 201, r.text
+    me = oc.get("/api/auth/me", headers=_h(r.json()["token"])).json()
+    assert me["user"]["email"] == "new@example.com" and me["user"]["is_admin"] is False
+    assert me["user"]["quota"]["videos"]["limit"] == 2  # normal daily limits still apply
+    assert oc.post("/api/auth/login", json={"email": "new@example.com", "password": PASSWORD}).status_code == 200
+    # a code is simply ignored (and not used up) when sign-up is open
+    code = auth.new_invite()
+    assert _open_join(oc, "two@example.com", invite_code=code).status_code == 201
+    assert _open_join(oc, "three@example.com", invite_code=code).status_code == 201
+
+
+def test_open_signup_keeps_the_basic_rules(oc: TestClient):
+    assert _open_join(oc, "not-an-email").status_code == 422
+    assert _open_join(oc, "a@example.com", "short").status_code == 422
+    assert _open_join(oc, "a@example.com").status_code == 201
+    assert _open_join(oc, "A@example.com").status_code == 409  # one account per email
+
+
+def test_open_signup_is_capped_per_visitor_and_per_day(oc: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("SIGNUP_PER_IP_PER_HOUR", "2")
+    monkeypatch.setenv("SIGNUP_DAILY_CAP", "3")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    auth.reset_throttle()
+    assert _open_join(oc, "a@example.com").status_code == 201
+    assert _open_join(oc, "b@example.com").status_code == 201
+    third = _open_join(oc, "c@example.com")
+    assert third.status_code == 429 and "hour" in third.json()["detail"]
+    auth.reset_throttle()  # a fresh visitor: now the server-wide daily cap is what stops them
+    assert _open_join(oc, "c@example.com").status_code == 201
+    full = _open_join(oc, "d@example.com")
+    assert full.status_code == 503 and "tomorrow" in full.json()["detail"]
+    assert db.get_user_by_email("d@example.com") is None
+
+
+def test_client_ip_trusts_cloudflare_only_from_localhost():
+    from starlette.requests import Request
+
+    def req(host: str, **headers: str) -> Request:
+        raw = [(k.replace("_", "-").encode(), v.encode()) for k, v in headers.items()]
+        return Request({"type": "http", "headers": raw, "client": (host, 5000)})
+
+    assert auth.client_ip(req("127.0.0.1", cf_connecting_ip="203.0.113.9")) == "203.0.113.9"  # through the tunnel
+    assert auth.client_ip(req("198.51.100.7", cf_connecting_ip="203.0.113.9")) == "198.51.100.7"  # can't be faked remotely
+    assert auth.client_ip(req("127.0.0.1")) == "127.0.0.1"
+
+
 def test_one_invite_cannot_be_spent_twice_in_a_race(ac: TestClient):
     code_hash = auth._sha(auth.normalize_code(auth.new_invite()))
     results: list[str] = []

@@ -80,7 +80,7 @@ def create_app() -> FastAPI:
             ffmpeg_ok = media.run_tool([cfg.ffmpeg, "-version"], timeout=10).returncode == 0
         except media.MediaError:
             ffmpeg_ok = False
-        return {"status": "ok", "ffmpeg": ffmpeg_ok, "auth_required": cfg.auth_enabled}
+        return {"status": "ok", "ffmpeg": ffmpeg_ok, "auth_required": cfg.auth_enabled, "signup_open": cfg.auth_enabled and cfg.open_signup}
 
     app.include_router(auth_api.router)
     app.include_router(videos.router)

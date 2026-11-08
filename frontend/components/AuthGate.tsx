@@ -33,6 +33,7 @@ export default function AuthGate({ children }: { children: (account: AccountInfo
   const [notice, setNotice] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [required, setRequired] = useState(false); // does this server use accounts at all?
+  const [signupOpen, setSignupOpen] = useState(false); // can anyone create an account, or is an invite code needed?
 
   const refresh = useCallback(() => {
     if (!required) return;
@@ -68,6 +69,7 @@ export default function AuthGate({ children }: { children: (account: AccountInfo
         const health = await getHealth();
         if (cancelled) return;
         setRequired(health.auth_required);
+        setSignupOpen(Boolean(health.signup_open));
         if (!health.auth_required) {
           setPhase("ready");
           return;
@@ -142,7 +144,7 @@ export default function AuthGate({ children }: { children: (account: AccountInfo
   if (phase === "login")
     return (
       <Shell user={null}>
-        <LoginView onSession={onSession} notice={notice} />
+        <LoginView onSession={onSession} notice={notice} openSignup={signupOpen} />
       </Shell>
     );
 

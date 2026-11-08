@@ -1,4 +1,4 @@
-"""Sign-up (invite only), sign-in, sign-out and "who am I" (with the signed media token)."""
+"""Sign-up (invite only, or open when OPEN_SIGNUP=true), sign-in, sign-out and "who am I" (with the signed media token)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class SignupBody(BaseModel):
-    invite_code: str = Field(max_length=64)
+    invite_code: str = Field(default="", max_length=64)  # not needed when OPEN_SIGNUP=true
     email: str = Field(max_length=254)
     password: str = Field(max_length=auth.MAX_PASSWORD)
 
@@ -39,16 +39,16 @@ def _session_reply(row: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.post("/signup", status_code=201)
-def signup(body: SignupBody) -> dict[str, Any]:
-    """Create an account with an invite code (made by an admin with `python -m app.admin invite`)."""
+def signup(body: SignupBody, request: Request) -> dict[str, Any]:
+    """Create an account: with an invite code (made by `python -m app.admin invite`), or freely when OPEN_SIGNUP=true."""
     _require_accounts()
-    return _session_reply(auth.signup(body.invite_code, body.email, body.password))
+    return _session_reply(auth.signup(body.invite_code, body.email, body.password, auth.client_ip(request)))
 
 
 @router.post("/login")
 def login(body: LoginBody, request: Request) -> dict[str, Any]:
     _require_accounts()
-    return _session_reply(auth.login(body.email, body.password, request.client.host if request.client else "?"))
+    return _session_reply(auth.login(body.email, body.password, auth.client_ip(request)))
 
 
 @router.post("/logout", status_code=204)

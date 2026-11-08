@@ -417,6 +417,26 @@ def create_user_with_invite(code_hash: str, email: str, password_hash: str) -> t
         return "ok", user_id
 
 
+def create_user_open(email: str, password_hash: str, daily_cap: int) -> tuple[str, int | None]:
+    """Open sign-up: create the account unless the server already took `daily_cap` new accounts in 24 h.
+
+    Returns ("ok", user_id), ("full", None) or ("exists", None). Check and insert are one transaction."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
+            return "exists", None
+        if conn.execute("SELECT COUNT(*) FROM users WHERE created_at > ?", (since,)).fetchone()[0] >= daily_cap:
+            return "full", None
+        user_id = int(
+            conn.execute(
+                "INSERT INTO users (email, password_hash, is_admin, created_at) VALUES (?, ?, 0, ?)",
+                (email, password_hash, _now()),
+            ).lastrowid
+        )
+        return "ok", user_id
+
+
 def try_record_usage(user_id: int, kind: str, limit: int | None, window: timedelta) -> bool:
     """Record one use of `kind` unless the user already used `limit` of them in the last `window`.
 
