@@ -56,5 +56,17 @@ Keep the laptop **plugged in and set to never sleep** while testers are using it
 - **Speed:** the laptop does all the work, one video at a time per task type. Several people at once will queue.
 - **If something looks wrong:** the backend window shows the log. `uv run python -m app.admin users` shows who has used what.
 
+## Offline page (what visitors see when Seqnce is off)
+When your laptop is off, a small Cloudflare Worker named `seqnce-offline` shows a Seqnce page ("Seqnce is resting, usually online 9:00 AM to 9:00 PM Philippine time, back in 8 h 8 min") instead of Cloudflare's "Error 1033". It runs on Cloudflare, so it works with the laptop off.
+
+- Code: `cloudflare/seqnce-offline/worker.js` (tests: `node --test cloudflare/seqnce-offline/worker.test.mjs`).
+- Attached to **`seqnce.orbitrixhq.com/*` only**, as a Worker Route with "Fail open" (if the Worker itself fails, visitors go straight to Seqnce). The API address is not touched.
+- To change the hours, edit `OPEN_HOUR` / `CLOSE_HOUR` at the top of `worker.js`, then in the Cloudflare dashboard open Workers & Pages -> `seqnce-offline` -> Edit code, paste the file, and Deploy.
+- Look at the page any time: `https://seqnce.orbitrixhq.com/__offline-preview`.
+- The "back in" time comes from the hours in the file, not from your laptop. If you are late turning it on, the page still shows the usual time. During the usual hours it says "taking a short break" with no countdown.
+- On an always-on server, remove the route (Workers & Pages -> `seqnce-offline` -> Domains -> remove the route) or keep it only for maintenance.
+
+Lesson from setting it up: a Worker "custom domain" set to **Production and Preview** also claims `*.yourdomain.com`, which hides every tunnel address. Keep `orbitrixhq.com` as Production only.
+
 ## Later: an always-on server
 Rent a small Linux server (4 CPU cores / 8 GB RAM is a comfortable start), install the same things (Python + uv, Node, FFmpeg), run the backend and website there as services, and move the same tunnel (or plain DNS records) to it. The two public names, the accounts and the data layout do not change.
