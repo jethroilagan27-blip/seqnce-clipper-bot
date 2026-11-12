@@ -62,8 +62,11 @@ When your laptop is off, a small Cloudflare Worker named `seqnce-offline` shows 
 - Code: `cloudflare/seqnce-offline/worker.js` (tests: `node --test cloudflare/seqnce-offline/worker.test.mjs`).
 - Attached to **`seqnce.orbitrixhq.com/*` only**, as a Worker Route with "Fail open" (if the Worker itself fails, visitors go straight to Seqnce). The API address is not touched.
 - To change the hours, edit `OPEN_HOUR` / `CLOSE_HOUR` at the top of `worker.js`, then in the Cloudflare dashboard open Workers & Pages -> `seqnce-offline` -> Edit code, paste the file, and Deploy.
-- Look at the page any time: `https://seqnce.orbitrixhq.com/__offline-preview`.
-- The "back in" time comes from the hours in the file, not from your laptop. If you are late turning it on, the page still shows the usual time. During the usual hours it says "taking a short break" with no countdown.
+- Look at the page any time: `https://seqnce.orbitrixhq.com/__offline-preview` (add `?state=open` or `?state=closed` to see each version).
+- The page has two versions, chosen by the hours in the file (it cannot see whether you are actually around):
+  - **Outside the usual hours:** "Seqnce is resting" with the usual hours and a "back in" countdown.
+  - **During the usual hours:** "Seqnce is switched off right now. Please notify Levin to turn the server on so you can use it." It reloads itself every minute, so it opens Seqnce as soon as the server is on. This way you only switch the laptop on when someone asks.
+- Change the name with `NAME` at the top of `worker.js`. `CONTACT` is an optional extra line under the message (for example your Messenger link); leave it empty to show nothing.
 - On an always-on server, remove the route (Workers & Pages -> `seqnce-offline` -> Domains -> remove the route) or keep it only for maintenance.
 
 Lesson from setting it up: a Worker "custom domain" set to **Production and Preview** also claims `*.yourdomain.com`, which hides every tunnel address. Keep `orbitrixhq.com` as Production only.

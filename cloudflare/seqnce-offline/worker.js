@@ -10,6 +10,8 @@
 const OPEN_HOUR = 9; // Seqnce is usually online from this hour...
 const CLOSE_HOUR = 21; // ...until this hour (24-hour clock, Philippine time)
 const TZ_OFFSET_HOURS = 8; // Philippines = UTC+8, no daylight saving
+const NAME = "Levin"; // who visitors should notify to switch Seqnce on during the usual hours
+const CONTACT = ""; // optional extra line under that message, e.g. "Message Levin on Messenger: m.me/yourpage" (plain text)
 
 const HOUR_MS = 3600 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -32,22 +34,26 @@ function insideOpenHours(now) {
 
 const clock = (hour) => `${((hour + 11) % 12) + 1}:00 ${hour % 24 < 12 ? "AM" : "PM"}`;
 
-function page(now) {
-  const inHours = insideOpenHours(now);
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// force: "open" or "closed" is only used by /__offline-preview, to look at either version of the page
+function page(now, force) {
+  const inHours = force === "open" ? true : force === "closed" ? false : insideOpenHours(now);
   const reopen = nextOpening(now);
   const hours = `${clock(OPEN_HOUR)} to ${clock(CLOSE_HOUR)} (Philippine time)`;
-  const headline = inHours ? "Seqnce is taking a short break" : "Seqnce is resting";
+  const headline = inHours ? "Seqnce is switched off right now" : "Seqnce is resting";
   const detail = inHours
-    ? "It should be back any minute. This page checks again by itself."
+    ? `Please notify ${esc(NAME)} to turn the server on so you can use it.`
     : "It isn't online around the clock yet. It's usually up every day from " + hours + ".";
+  const contact = inHours && CONTACT ? `<p>${esc(CONTACT)}</p>` : "";
   const countdown = inHours
-    ? ""
+    ? `${contact}<p class="small">Once it's on, this page opens Seqnce by itself.</p>`
     : `<p class="count">Back in about <b id="t">...</b></p>
        <p class="small">Usually around <span id="at"></span></p>`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Seqnce is resting</title>
+<title>${headline}</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -86,17 +92,21 @@ function page(now) {
 </script></body></html>`;
 }
 
-function offline(request, now) {
+function offline(request, now, force) {
   const wantsHtml = (request.headers.get("accept") || "").includes("text/html");
   const headers = { "cache-control": "no-store", "retry-after": "300" };
   if (!wantsHtml) return new Response("Seqnce is offline right now.", { status: 503, headers });
-  return new Response(page(now), { status: 503, headers: { ...headers, "content-type": "text/html; charset=utf-8" } });
+  return new Response(page(now, force), { status: 503, headers: { ...headers, "content-type": "text/html; charset=utf-8" } });
 }
 
 export default {
   async fetch(request) {
     const now = Date.now();
-    if (new URL(request.url).pathname === "/__offline-preview") return offline(new Request(request, { headers: { accept: "text/html" } }), now);
+    const url = new URL(request.url);
+    if (url.pathname === "/__offline-preview") {
+      // /__offline-preview?state=open or ?state=closed shows the two versions; no state = the real one for this moment
+      return offline(new Request(request, { headers: { accept: "text/html" } }), now, url.searchParams.get("state"));
+    }
     let response;
     try {
       response = await fetch(request); // goes on to Seqnce (the tunnel)

@@ -48,12 +48,42 @@ test("a thrown fetch also shows the offline page", async () => {
   assert.equal((await worker.fetch(nav())).status, 503);
 });
 
-test("during opening hours the page says it is a short break, with no countdown", async () => {
+test("during opening hours the page asks visitors to notify Levin, with no countdown", async () => {
   at("2026-11-10T06:00:00Z"); // 2 PM in the Philippines
   stub(async () => new Response("", { status: 530 }));
   const html = await (await worker.fetch(nav())).text();
-  assert.match(html, /short break/);
+  assert.match(html, /Seqnce is switched off right now/);
+  assert.match(html, /Please notify Levin to turn the server on so you can use it\./);
+  assert.match(html, /opens Seqnce by itself/);
   assert.ok(!html.includes("Back in about"));
+  assert.ok(!html.includes("any minute"));
+  assert.ok(!html.includes("usually up every day"));
+});
+
+test("outside opening hours it still shows the resting page and does not ask anyone to turn it on", async () => {
+  at("2026-11-10T16:00:00Z"); // midnight in the Philippines
+  stub(async () => new Response("", { status: 530 }));
+  const html = await (await worker.fetch(nav())).text();
+  assert.match(html, /Seqnce is resting/);
+  assert.ok(!html.includes("Please notify"));
+});
+
+test("the opening hour itself (9 AM) already counts as opening hours, 9 PM does not", async () => {
+  stub(async () => new Response("", { status: 530 }));
+  at("2026-11-11T01:00:00Z"); // 9:00 AM in the Philippines
+  assert.match(await (await worker.fetch(nav())).text(), /Please notify Levin/);
+  at("2026-11-10T12:59:00Z"); // 8:59 PM
+  assert.match(await (await worker.fetch(nav())).text(), /Please notify Levin/);
+  at("2026-11-10T13:00:00Z"); // 9:00 PM
+  assert.match(await (await worker.fetch(nav())).text(), /Seqnce is resting/);
+});
+
+test("preview can force either version of the page", async () => {
+  at("2026-11-10T16:00:00Z"); // night, so the default would be "resting"
+  const open = await (await worker.fetch(nav("/__offline-preview?state=open"))).text();
+  assert.match(open, /Please notify Levin/);
+  const closed = await (await worker.fetch(nav("/__offline-preview?state=closed"))).text();
+  assert.match(closed, /Seqnce is resting/);
 });
 
 test("after closing time the next opening is tomorrow morning", async () => {
