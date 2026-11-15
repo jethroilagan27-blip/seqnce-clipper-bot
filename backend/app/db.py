@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS users (
     disabled      INTEGER NOT NULL DEFAULT 0,
     video_limit   INTEGER,                      -- NULL = the server default
     chat_limit    INTEGER,
+    plan          TEXT NOT NULL DEFAULT 'standard',   -- standard | pro | max (see features.py)
+    features_json TEXT,                               -- per-account feature overrides
     created_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -131,6 +133,11 @@ def init_db() -> None:
             conn.execute("ALTER TABLE jobs ADD COLUMN user_id INTEGER")  # owner; NULL = created without accounts
         if "revision_json" not in existing:
             conn.execute("ALTER TABLE jobs ADD COLUMN revision_json TEXT")  # pending revision request
+        user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+        if "plan" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'standard'")
+        if "features_json" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN features_json TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -339,7 +346,7 @@ def list_users() -> list[dict[str, Any]]:
         return [dict(r) for r in conn.execute("SELECT * FROM users ORDER BY id")]
 
 
-_USER_FIELDS = {"password_hash", "is_admin", "disabled", "video_limit", "chat_limit"}
+_USER_FIELDS = {"password_hash", "is_admin", "disabled", "video_limit", "chat_limit", "plan", "features_json"}
 
 
 def update_user(user_id: int, **fields: Any) -> None:

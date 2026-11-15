@@ -163,5 +163,8 @@ Issues and pull requests are welcome. Please run the tests above before opening 
 
 [MIT](LICENSE) © 2026 Jethro Ilagan. FFmpeg, faster-whisper and the other dependencies have their own licenses; FFmpeg is installed separately and is not distributed with this repository.
 
+## Studio (heavy, scripted edits)
+Studio builds long videos from a script: many scenes, each with the user's own clips, pictures, voice-over, music and text, with fades and cross-fades, titles in your own font, pictures and highlights over a scene, map pins, a grid of several clips at once, rolling credits, and music that lowers while someone speaks. It is switched on per account (plans and single features: see [docs/STUDIO.md](docs/STUDIO.md)); new accounts do not have it.
+
 ## Removing photo mode
 Photo mode is deliberately self-contained. To remove it: delete `backend/app/slideshow/` and `backend/tests/test_slideshow.py`, delete the lines marked `# photo mode` in `backend/app/main.py`, delete `frontend/app/photos/` and `frontend/components/photos/`, and remove the mode switch in `frontend/components/Shell.tsx`. (The shared text overlay code in `backend/app/editing/overlays.py` is also used by video mode and stays.)

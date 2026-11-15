@@ -86,7 +86,7 @@ export default function OverlayLayer({ texts, time, total, selectedId = null, on
               transform: "translate(-50%, -50%)",
               fontSize: `${t.size}cqw`,
               lineHeight: 1.15,
-              fontFamily: "Arial, Helvetica, sans-serif",
+              fontFamily: t.font ? `"${t.font}", Arial, Helvetica, sans-serif` : "Arial, Helvetica, sans-serif",
               fontWeight: t.bold ? 800 : 400,
               textAlign: "center",
               whiteSpace: "pre",

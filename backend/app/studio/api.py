@@ -1,0 +1,321 @@
+"""HTTP API for Studio: /api/studio/...
+
+Same rules as the rest of the app: every route needs a login when accounts are on, a project belongs to the
+user who made it (someone else's looks like a missing one), uploads are checked before they are read, and
+every route (apart from the files the browser loads itself) needs the "studio" feature on the account.
+"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+from pathlib import Path as FsPath
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+
+from .. import auth, uploadguard
+from ..auth import User, can_access, current_user, ensure_quota, media_user, spend_quota
+from ..config import get_settings
+from . import engine, ingest, store
+from .schemas import (
+    AUDIO_SUFFIXES,
+    FONT_SUFFIXES,
+    IMAGE_SUFFIXES,
+    MAX_BATCH_BYTES,
+    MAX_SCENES_HARD,
+    MAX_VISUALS_PER_SCENE,
+    VIDEO_SUFFIXES,
+    StudioDoc,
+)
+
+log = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/studio", tags=["studio"])
+
+PROJECT_ID = Path(pattern=r"^[0-9a-f]{32}$", description="Studio project id")
+ASSET_ID = Path(pattern=r"^[0-9a-f]{16}$", description="Studio file id")
+SCENE_ID = r"^[A-Za-z0-9_-]{1,40}$"
+
+uploadguard.register(r"^/api/studio/projects/[0-9a-f]{32}/assets$", lambda: MAX_BATCH_BYTES)
+
+NO_STUDIO = "Studio isn't included in your plan. Ask the Seqnce team to switch it on for your account."
+
+
+def _owner_id(user: User) -> int | None:
+    return user.id if get_settings().auth_enabled else None
+
+
+def _feats(user: User) -> dict[str, Any]:
+    return auth.require_feature(user, "studio", NO_STUDIO)
+
+
+def _project_or_404(project_id: str, user: User) -> dict[str, Any]:
+    project = store.get(project_id)
+    if project is None or not can_access(user, {"user_id": project["user_id"]}):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+def _editable(project: dict[str, Any]) -> None:
+    if project["status"] in store.ACTIVE:
+        raise HTTPException(status_code=409, detail="The video is being made right now. Wait for it to finish.")
+
+
+def _limits(feats: dict[str, Any]) -> dict[str, Any]:
+    keys = ("studio_max_projects", "studio_max_scenes", "studio_max_minutes", "studio_max_height", "studio_max_assets",
+            "studio_max_storage_mb", "studio_max_file_mb", "studio_renders_per_day", "studio_crossfade", "studio_text_effects",
+            "studio_overlays", "studio_grid", "studio_credits", "studio_ducking", "studio_auto_montage", "studio_custom_fonts")
+    return {k.removeprefix("studio_"): feats[k] for k in keys} | {"max_visuals_per_scene": MAX_VISUALS_PER_SCENE}
+
+
+def _family(project_id: str, asset: dict[str, Any]) -> str | None:
+    """The name a text has to ask for to use an uploaded font."""
+    try:
+        return ingest.font_family(store.project_dir(project_id) / "assets" / asset["file"])
+    except ingest.AssetError:
+        return None
+
+
+def _out(project: dict[str, Any], feats: dict[str, Any]) -> dict[str, Any]:
+    pid = project["id"]
+    asset_rows = store.assets(pid)
+    refs = engine.asset_refs(pid)
+    doc = StudioDoc.model_validate(project["doc_json"])
+    scene_info, total = engine.describe_scenes(doc, refs)
+    n_assets, n_bytes = store.asset_totals(pid)
+    meta = project.get("output_meta_json")
+    return {
+        "id": pid,
+        "title": project["title"],
+        "status": project["status"],
+        "progress": project["progress"],
+        "stage": project.get("stage_text"),
+        "error": project.get("error"),
+        "render": {"kind": project.get("render_kind"), "scene": project.get("render_scene")},
+        "doc": doc.model_dump(),  # filled in with defaults, so projects saved before a tool existed still open
+        "assets": [
+            {"id": a["id"], "kind": a["kind"], "name": a["original_name"], "width": a["width"], "height": a["height"],
+             "duration": a["duration"], "has_audio": bool(a["has_audio"]), "size_bytes": a["size_bytes"],
+             "family": _family(pid, a) if a["kind"] == "font" else None}
+            for a in asset_rows
+        ],
+        "scenes": scene_info,
+        "total_seconds": total,
+        "has_output": bool(project.get("output_path")),
+        "output": ({k: meta[k] for k in ("duration", "width", "height", "size_bytes") if k in meta} if meta else None),
+        "preview": {"scene": project.get("preview_scene") or None} if project.get("preview_path") else None,
+        "usage": {"assets": n_assets, "bytes": n_bytes},
+        "limits": _limits(feats),
+        "created_at": project["created_at"],
+        "updated_at": project["updated_at"],
+    }
+
+
+# ---- what the page needs to know ------------------------------------------------
+
+@router.get("/info")
+def info(user: User = Depends(current_user)) -> dict[str, Any]:
+    feats = _feats(user)
+    return {
+        "limits": _limits(feats),
+        "fonts": engine.font_families(),
+        "accepts": {"video": sorted(VIDEO_SUFFIXES), "audio": sorted(AUDIO_SUFFIXES), "image": sorted(IMAGE_SUFFIXES),
+                    "font": sorted(FONT_SUFFIXES) if feats["studio_custom_fonts"] else []},
+        "max_scenes_hard": MAX_SCENES_HARD,
+    }
+
+
+# ---- projects -------------------------------------------------------------------
+
+class CreateBody(BaseModel):
+    title: str = Field(default="Untitled video", max_length=80)
+
+
+@router.post("/projects", status_code=201)
+def create_project(body: CreateBody | None = None, user: User = Depends(current_user)) -> dict[str, str]:
+    feats = _feats(user)
+    if store.count_for_user(_owner_id(user)) >= feats["studio_max_projects"]:
+        raise HTTPException(status_code=409, detail=f"You can keep {feats['studio_max_projects']} Studio project(s). Delete an old one first.")
+    doc = StudioDoc(title=body.title if body else "Untitled video")
+    project_id = uuid.uuid4().hex
+    store.create(project_id, _owner_id(user), doc.title, doc.model_dump())
+    return {"id": project_id}
+
+
+@router.get("/projects")
+def list_projects(user: User = Depends(current_user)) -> dict[str, Any]:
+    _feats(user)
+    rows = store.list_for_user(_owner_id(user), everyone=get_settings().auth_enabled and user.is_admin)
+    return {"projects": [
+        {"id": r["id"], "title": r["title"], "status": r["status"], "asset_count": r["asset_count"],
+         "scene_count": len(r["doc_json"].get("scenes", [])), "has_output": bool(r.get("output_path")),
+         "updated_at": r["updated_at"]}
+        for r in rows
+    ]}
+
+
+@router.get("/projects/{project_id}")
+def get_project(project_id: str = PROJECT_ID, user: User = Depends(current_user)) -> dict[str, Any]:
+    feats = _feats(user)
+    return _out(_project_or_404(project_id, user), feats)
+
+
+@router.delete("/projects/{project_id}", status_code=204)
+def delete_project(project_id: str = PROJECT_ID, user: User = Depends(current_user)) -> None:
+    _feats(user)
+    _editable(_project_or_404(project_id, user))
+    store.delete(project_id)
+
+
+@router.put("/projects/{project_id}/doc")
+def put_doc(body: StudioDoc, project_id: str = PROJECT_ID, user: User = Depends(current_user)) -> dict[str, Any]:
+    """Save the whole project document (scenes and everything in them)."""
+    feats = _feats(user)
+    project = _project_or_404(project_id, user)
+    _editable(project)
+    known = {a["id"] for a in store.assets(project_id)}
+    unknown = body.asset_ids() - known
+    if unknown:
+        raise HTTPException(status_code=422, detail="A scene uses a file that isn't in this project (it may have been deleted). Reload the page.")
+    problems = engine.check_doc_allowed(body, feats)
+    if problems:
+        raise HTTPException(status_code=403, detail=problems[0])
+    store.update(project_id, title=body.title, doc_json=body.model_dump())
+    return _out(store.get(project_id) or {}, feats)
+
+
+# ---- files ----------------------------------------------------------------------
+
+@router.post("/projects/{project_id}/assets")
+def upload_assets(
+    project_id: str = PROJECT_ID, files: list[UploadFile] = File(...), user: User = Depends(current_user)
+) -> dict[str, Any]:
+    """Add clips, audio files and pictures (one or a few per request; the page sends them one at a time)."""
+    feats = _feats(user)
+    project = _project_or_404(project_id, user)
+    _editable(project)
+    base = store.project_dir(project_id)
+    max_file = feats["studio_max_file_mb"] * 1024 * 1024
+    added: list[dict[str, Any]] = []
+    rejected: list[dict[str, str]] = []
+    count, used = store.asset_totals(project_id)
+    for f in files:
+        name = (f.filename or "file").replace("\\", "/").rsplit("/", 1)[-1][:120]
+        if count >= feats["studio_max_assets"]:
+            rejected.append({"name": name, "reason": f"A project holds at most {feats['studio_max_assets']} files."})
+            continue
+        if ingest.kind_of(name) == "font" and not feats["studio_custom_fonts"]:
+            rejected.append({"name": name, "reason": "Uploading your own fonts isn't included in your plan."})
+            continue
+        room = feats["studio_max_storage_mb"] * 1024 * 1024 - used
+        if room <= 0:
+            rejected.append({"name": name, "reason": f"This project is full ({feats['studio_max_storage_mb']} MB). Delete files you don't use."})
+            continue
+        asset_id = uuid.uuid4().hex[:16]  # server-made name: nothing from the client reaches the file system
+        try:
+            got = ingest.ingest(f.file, name, base, asset_id, min(max_file, room))
+        except ingest.AssetError as exc:
+            rejected.append({"name": name, "reason": str(exc)})
+            continue
+        store.add_asset(project_id, asset_id, got.kind, name, got.file, width=got.width, height=got.height,
+                        duration=got.duration, has_audio=got.has_audio, size_bytes=got.size_bytes)
+        count += 1
+        used += got.size_bytes
+        added.append({"id": asset_id, "kind": got.kind, "name": name})
+    return {"added": added, "rejected": rejected, "project": _out(store.get(project_id) or {}, feats)}
+
+
+@router.delete("/projects/{project_id}/assets/{asset_id}")
+def delete_asset(project_id: str = PROJECT_ID, asset_id: str = ASSET_ID, user: User = Depends(current_user)) -> dict[str, Any]:
+    """Delete a file. Every scene that used it loses that clip / voice-over / music."""
+    feats = _feats(user)
+    project = _project_or_404(project_id, user)
+    _editable(project)
+    if store.get_asset(project_id, asset_id) is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    doc = StudioDoc.model_validate(project["doc_json"]).without_assets({asset_id})
+    store.update(project_id, doc_json=doc.model_dump())
+    store.delete_asset(project_id, asset_id)
+    return _out(store.get(project_id) or {}, feats)
+
+
+_PRIVATE = {"Cache-Control": "private, max-age=3600"}
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/thumb")
+def asset_thumb(project_id: str = PROJECT_ID, asset_id: str = ASSET_ID, user: User = Depends(media_user)) -> FileResponse:
+    _project_or_404(project_id, user)
+    path = store.project_dir(project_id) / "thumbs" / f"{asset_id}.jpg"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No thumbnail")
+    return FileResponse(path, media_type="image/jpeg", headers=_PRIVATE)
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/file")
+def asset_file(project_id: str = PROJECT_ID, asset_id: str = ASSET_ID, user: User = Depends(media_user)) -> FileResponse:
+    _project_or_404(project_id, user)
+    asset = store.get_asset(project_id, asset_id)
+    path = store.project_dir(project_id) / "assets" / asset["file"] if asset else None
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path, headers=_PRIVATE)
+
+
+# ---- making the video -----------------------------------------------------------
+
+class RenderBody(BaseModel):
+    kind: Literal["final", "preview"] = "final"
+    scene_id: str | None = Field(default=None, pattern=SCENE_ID)  # preview of just this scene (None = the whole video)
+
+
+@router.post("/projects/{project_id}/render", status_code=202)
+def start_render(body: RenderBody, project_id: str = PROJECT_ID, user: User = Depends(current_user)) -> dict[str, Any]:
+    cfg = get_settings()
+    feats = _feats(user)
+    project = _project_or_404(project_id, user)
+    _editable(project)
+    if body.kind == "final" and body.scene_id is not None:
+        raise HTTPException(status_code=422, detail="The finished video is always the whole project. Use a preview for one scene.")
+    try:
+        engine.prepare(project, body.kind, body.scene_id)  # refuse a problem before it costs the user a render
+    except engine.StudioError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if cfg.auth_enabled and not user.is_admin and store.count_active_for_user(user.id) >= cfg.max_active_jobs_per_user:
+        raise HTTPException(status_code=409, detail="You already have a video being made. Wait for it to finish.")
+    if body.kind == "final":  # previews are free; the finished video counts against the plan's daily limit
+        ensure_quota(user, "studio")
+        spend_quota(user, "studio")
+    store.update(project_id, status="queued", progress=0, error=None, stage_text="Waiting its turn",
+                 render_kind=body.kind, render_scene=body.scene_id)
+    return _out(store.get(project_id) or {}, feats)
+
+
+def _file(project_id: str, user: User, which: Literal["output", "preview"], scene: str | None = None) -> FsPath:
+    project = _project_or_404(project_id, user)
+    key = "output_path" if which == "output" else "preview_path"
+    path = FsPath(project[key]) if project.get(key) else None
+    if which == "preview":
+        wanted = store.project_dir(project_id) / "previews" / f"{scene or 'all'}.mp4"  # any preview made earlier, not only the latest
+        path = wanted if wanted.is_file() else None
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=409, detail="That video isn't ready yet.")
+    return path
+
+
+@router.get("/projects/{project_id}/preview")
+def preview(project_id: str = PROJECT_ID, scene: str | None = Query(None, pattern=SCENE_ID), user: User = Depends(media_user)) -> FileResponse:
+    return FileResponse(_file(project_id, user, "preview", scene), media_type="video/mp4", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/projects/{project_id}/video")
+def video(project_id: str = PROJECT_ID, user: User = Depends(media_user)) -> FileResponse:
+    return FileResponse(_file(project_id, user, "output"), media_type="video/mp4", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/projects/{project_id}/download")
+def download(project_id: str = PROJECT_ID, user: User = Depends(media_user)) -> FileResponse:
+    project = _project_or_404(project_id, user)
+    name = "".join(c if c.isalnum() or c in " -_" else "" for c in project["title"]).strip() or "studio-video"
+    return FileResponse(_file(project_id, user, "output"), media_type="video/mp4", filename=f"{name}.mp4")

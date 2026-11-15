@@ -17,19 +17,20 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
 import threading
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException, Query, Request
 
-from . import db
+from . import db, features
 from .config import get_settings
 
 SCRYPT_N, SCRYPT_R, SCRYPT_P = 2**14, 8, 1  # ~16 MiB and ~50-100 ms per hash
@@ -38,7 +39,11 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 QUOTA_WINDOW = timedelta(hours=24)
 MEDIA_TOKEN_TTL_S = 6 * 3600
 INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I to avoid typos
-KINDS = {"video": ("video", "videos"), "chat": ("chat message", "chat messages")}
+KINDS = {
+    "video": ("video", "videos"),
+    "chat": ("chat message", "chat messages"),
+    "studio": ("Studio video", "Studio videos"),
+}
 
 
 @dataclass(frozen=True)
@@ -48,19 +53,40 @@ class User:
     is_admin: bool
     video_limit: int | None = None  # per-user override of DAILY_VIDEO_LIMIT
     chat_limit: int | None = None
+    plan: str = features.DEFAULT_PLAN  # standard | pro | max
+    overrides: dict[str, Any] = field(default_factory=dict)  # per-account feature overrides (features.py)
 
 
 LOCAL_USER = User(id=0, email="local", is_admin=True)  # who everyone is when accounts are switched off
 
 
 def _to_user(row: dict[str, Any]) -> User:
+    try:
+        overrides = json.loads(row["features_json"]) if row.get("features_json") else {}
+    except ValueError:
+        overrides = {}
     return User(
         id=int(row["id"]),
         email=row["email"],
         is_admin=bool(row["is_admin"]),
         video_limit=row.get("video_limit"),
         chat_limit=row.get("chat_limit"),
+        plan=row.get("plan") or features.DEFAULT_PLAN,
+        overrides=features.clean_overrides(overrides),
     )
+
+
+def features_of(user: User) -> dict[str, Any]:
+    """What this account may use: its plan plus its own overrides (admins and local use: everything)."""
+    return features.resolve(user.plan, user.overrides, admin=user.is_admin or not get_settings().auth_enabled)
+
+
+def require_feature(user: User, key: str, message: str | None = None) -> dict[str, Any]:
+    """403 unless the account has this feature switched on. Returns all the account's features."""
+    values = features_of(user)
+    if not values.get(key):
+        raise HTTPException(status_code=403, detail=message or "That isn't included in your plan. Ask the Seqnce team to switch it on.")
+    return values
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +387,8 @@ def limit_for(user: User, kind: str) -> int | None:
     cfg = get_settings()
     if not cfg.auth_enabled or user.is_admin:
         return None
+    if kind == "studio":
+        return features_of(user)["studio_renders_per_day"]
     own = user.video_limit if kind == "video" else user.chat_limit
     return own if own is not None else (cfg.daily_video_limit if kind == "video" else cfg.daily_chat_limit)
 
@@ -416,5 +444,11 @@ def user_payload(user: User) -> dict[str, Any]:
     return {
         "email": user.email,
         "is_admin": user.is_admin,
-        "quota": {"videos": quota_status(user, "video"), "chats": quota_status(user, "chat")},
+        "plan": "max" if user.is_admin else user.plan,
+        "features": features_of(user),
+        "quota": {
+            "videos": quota_status(user, "video"),
+            "chats": quota_status(user, "chat"),
+            "studio": quota_status(user, "studio"),
+        },
     }

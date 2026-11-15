@@ -22,15 +22,16 @@ export function quotaBlock(q: Quota | undefined, singular: string, plural: strin
 type Props = {
   user: AuthUser | null;
   onSignOut?: () => void;
-  wide?: boolean;
+  /** true = a wide page; "xl" = the widest (Studio). */
+  wide?: boolean | "xl";
   /** Which mode is open; shows the mode switch. */
-  section?: "video" | "photos";
+  section?: "video" | "photos" | "studio";
   children: ReactNode;
 };
 
-// The mode switch ("Edit with video" / "Edit with photos"). Photo mode is self-contained: to remove it, delete this
-// component and its use below, plus app/photos/ and components/photos/.
-function ModeSwitch({ section }: { section: "video" | "photos" }) {
+// The mode switch ("Edit with video" / "Edit with photos" / "Studio"). Photo mode and Studio are self-contained: to
+// remove one, delete its tab below, plus its app/ folder and components/ folder.
+function ModeSwitch({ section, studio }: { section: "video" | "photos" | "studio"; studio: boolean }) {
   const tab = (on: boolean) =>
     `rounded-lg px-4 py-2 text-sm ${on ? "bg-violet-600 font-semibold text-white" : "text-white/60 hover:bg-white/5 hover:text-white"}`;
   return (
@@ -41,6 +42,11 @@ function ModeSwitch({ section }: { section: "video" | "photos" }) {
       <Link href="/photos" aria-current={section === "photos" ? "page" : undefined} className={tab(section === "photos")}>
         Edit with photos
       </Link>
+      {studio && (
+        <Link href="/studio" aria-current={section === "studio" ? "page" : undefined} className={tab(section === "studio")}>
+          Studio
+        </Link>
+      )}
     </nav>
   );
 }
@@ -48,8 +54,9 @@ function ModeSwitch({ section }: { section: "video" | "photos" }) {
 export default function Shell({ user, onSignOut, wide, section, children }: Props) {
   const v = user?.quota.videos;
   const left = v && v.limit !== null ? Math.max(0, v.limit - v.used) : null;
+  const showStudio = user ? !!user.features?.studio : true; // accounts without the Studio feature never see the tab (with no accounts: everyone has it)
   return (
-    <main className={`mx-auto w-full flex-1 px-5 py-10 ${wide ? "max-w-5xl" : "max-w-xl"}`}>
+    <main className={`mx-auto w-full flex-1 px-5 py-10 ${wide === "xl" ? "max-w-7xl" : wide ? "max-w-5xl" : "max-w-xl"}`}>
       <header className="mb-8 flex items-center gap-3">
         <Image src="/logo.png" alt="" width={40} height={40} priority className="h-10 w-10 shrink-0 rounded-xl" />
         <div className="min-w-0 flex-1">
@@ -76,7 +83,7 @@ export default function Shell({ user, onSignOut, wide, section, children }: Prop
           </div>
         )}
       </header>
-      {section && <ModeSwitch section={section} />}
+      {section && <ModeSwitch section={section} studio={showStudio} />}
       {children}
     </main>
   );

@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import auth, db, slideshow, uploadguard  # slideshow = photo mode (self-contained, see its docstring)
+from . import auth, db, slideshow, studio, uploadguard  # slideshow = photo mode, studio = Studio (both self-contained, see their docstrings)
 from .api import auth as auth_api
 from .api import jobs, music, videos
 from .config import get_settings
@@ -36,7 +36,10 @@ def create_app() -> FastAPI:
         worker.start()
         slideshow.start()  # photo mode
         slideshow.purge(cfg.retention_days)  # photo mode
+        studio.start()  # studio
+        studio.purge(cfg.retention_days)  # studio
         yield
+        studio.stop()  # studio
         slideshow.stop()  # photo mode
         worker.stop()
 
@@ -87,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router)
     app.include_router(music.router)
     app.include_router(slideshow.router)  # photo mode
+    app.include_router(studio.router)  # studio
     return app
 
 

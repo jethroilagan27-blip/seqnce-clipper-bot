@@ -244,7 +244,15 @@ export async function authedFetch(path: string, init: RequestInit = {}): Promise
 }
 
 export type Quota = { used: number; limit: number | null; resets_at: string | null };
-export type AuthUser = { email: string; is_admin: boolean; quota: { videos: Quota; chats: Quota } };
+/** What an account may use (plan + per-account changes). The server enforces these; the page only hides or locks things. */
+export type AccountFeatures = Record<string, number | boolean | null> & { studio: boolean };
+export type AuthUser = {
+  email: string;
+  is_admin: boolean;
+  plan: string;
+  features: AccountFeatures;
+  quota: { videos: Quota; chats: Quota; studio?: Quota };
+};
 export type Session = { token: string; media_token: string; user: AuthUser };
 
 async function postAuth<T>(path: string, body: unknown): Promise<T> {

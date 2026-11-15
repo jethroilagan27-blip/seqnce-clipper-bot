@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { MAX_TEXTS, TEXT_COLORS, newText, type TextOverlay, type TextStyle } from "@/lib/overlays";
 
 type Props = {
@@ -10,6 +11,8 @@ type Props = {
   disabled?: boolean;
   onChange: (texts: TextOverlay[]) => void;
   onSelect: (id: string | null) => void;
+  /** Extra controls for the open text (Studio adds the font and the zoom animation here). */
+  extra?: (text: TextOverlay, patch: (p: Partial<TextOverlay>) => void) => ReactNode;
 };
 
 const STYLES: { key: TextStyle; label: string }[] = [
@@ -21,7 +24,7 @@ const STYLES: { key: TextStyle; label: string }[] = [
 const num = "w-20 rounded-md border border-white/10 bg-[#15151c] px-2 py-1 text-sm tabular-nums disabled:opacity-50";
 
 // Add your own text, then drag it on the preview. Everything about a text (words, colour, size, style, when it shows) is here.
-export default function TextEditor({ texts, selectedId, total, disabled, onChange, onSelect }: Props) {
+export default function TextEditor({ texts, selectedId, total, disabled, onChange, onSelect, extra }: Props) {
   const patch = (id: string, p: Partial<TextOverlay>) => onChange(texts.map((t) => (t.id === id ? { ...t, ...p } : t)));
 
   return (
@@ -138,6 +141,7 @@ export default function TextEditor({ texts, selectedId, total, disabled, onChang
                       <input type="checkbox" checked={t.fade} disabled={disabled} onChange={(e) => patch(t.id, { fade: e.target.checked })} className="accent-violet-500" /> Fade in/out
                     </label>
                   </div>
+                  {extra?.(t, (p) => patch(t.id, p))}
                   <div className="flex flex-wrap items-center gap-2 text-xs text-white/60">
                     <label className="flex items-center gap-1.5">
                       <input

@@ -17,6 +17,9 @@ export type TextOverlay = {
   start: number; // seconds
   end: number | null; // null = until the end
   fade: boolean;
+  /** Studio only: a font family from the server's list ("" or missing = the default font), and a slow zoom while it shows. */
+  font?: string;
+  anim?: "none" | "zoom_in" | "zoom_out";
 };
 
 export const MAX_TEXTS = 30;
