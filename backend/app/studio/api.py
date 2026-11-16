@@ -224,8 +224,19 @@ def upload_assets(
         except ingest.AssetError as exc:
             rejected.append({"name": name, "reason": str(exc)})
             continue
-        store.add_asset(project_id, asset_id, got.kind, name, got.file, width=got.width, height=got.height,
-                        duration=got.duration, has_audio=got.has_audio, size_bytes=got.size_bytes, folder=folder)
+        # Uploads arrive side by side (the page sends three at once): the numbers read at the start of this request may be
+        # out of date, so the limits are checked again, atomically, at the moment the file is kept.
+        refused = store.add_asset(
+            project_id, asset_id, got.kind, name, got.file, width=got.width, height=got.height, duration=got.duration,
+            has_audio=got.has_audio, size_bytes=got.size_bytes, folder=folder,
+            max_count=feats["studio_max_assets"], max_bytes=feats["studio_max_storage_mb"] * 1024 * 1024,
+        )
+        if refused:
+            (base / "assets" / got.file).unlink(missing_ok=True)
+            (base / "thumbs" / f"{asset_id}.jpg").unlink(missing_ok=True)
+            rejected.append({"name": name, "reason": (f"A project holds at most {feats['studio_max_assets']} files." if refused == "count"
+                                                      else f"This project is full ({feats['studio_max_storage_mb']} MB). Delete files you don't use.")})
+            continue
         count += 1
         used += got.size_bytes
         added.append({"id": asset_id, "kind": got.kind, "name": name, "folder": folder})

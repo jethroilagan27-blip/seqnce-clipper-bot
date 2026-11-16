@@ -154,14 +154,25 @@ def get_asset(project_id: str, asset_id: str) -> dict[str, Any] | None:
 
 
 def add_asset(project_id: str, asset_id: str, kind: str, name: str, file: str, *, width: int | None, height: int | None,
-              duration: float | None, has_audio: bool, size_bytes: int, folder: str = "") -> None:
+              duration: float | None, has_audio: bool, size_bytes: int, folder: str = "",
+              max_count: int | None = None, max_bytes: int | None = None) -> str | None:
+    """Keep the file's row. With limits given, the check and the insert are ONE atomic step (uploads arrive side by side,
+    so "check, then insert" would let several slip past the same limit). Returns None, or "count" / "bytes" when refused."""
     with db.connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")  # one writer at a time from here to the commit
+        if max_count is not None or max_bytes is not None:
+            row = conn.execute("SELECT COUNT(*) AS n, COALESCE(SUM(size_bytes), 0) AS b FROM studio_assets WHERE project_id = ?", (project_id,)).fetchone()
+            if max_count is not None and row["n"] >= max_count:
+                return "count"
+            if max_bytes is not None and row["b"] + size_bytes > max_bytes:
+                return "bytes"
         pos = conn.execute("SELECT COALESCE(MAX(position), -1) + 1 AS p FROM studio_assets WHERE project_id = ?", (project_id,)).fetchone()["p"]
         conn.execute(
             "INSERT INTO studio_assets (id, project_id, kind, position, original_name, folder, file, width, height, duration, has_audio, size_bytes) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (asset_id, project_id, kind, pos, name, folder, file, width, height, duration, int(has_audio), size_bytes),
         )
+    return None
 
 
 # ---- the AI chat ------------------------------------------------------------------

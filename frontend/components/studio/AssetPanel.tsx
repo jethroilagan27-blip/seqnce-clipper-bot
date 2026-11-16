@@ -3,7 +3,8 @@
 import { useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { baseName, folderOf, fromFileList, mergePicked, naturalCompare, safeFromDataTransfer, splitByExtension, type Picked } from "@/lib/pickFiles";
-import { assetFileUrl, deleteAsset, formatMegabytes, formatSeconds, thumbUrl, uploadAsset, type Asset, type AssetKind, type Project } from "@/lib/studio";
+import { runPool } from "@/lib/pool";
+import { assetFileUrl, deleteAsset, formatMegabytes, formatSeconds, getProject, thumbUrl, uploadAsset, type Asset, type AssetKind, type Project } from "@/lib/studio";
 import { ConfirmButton } from "./ui";
 
 type Props = {
@@ -26,6 +27,7 @@ const GROUPS: { kind: AssetKind; title: string; empty: string }[] = [
 ];
 
 let uploadKey = 0;
+const PARALLEL_UPLOADS = 3;
 
 export default function AssetPanel({ project, accepts, disabled, onProject, onDeleted }: Props) {
   const input = useRef<HTMLInputElement>(null);
@@ -42,18 +44,24 @@ export default function AssetPanel({ project, accepts, disabled, onProject, onDe
     const problems: string[] = [];
     const { accepted, skipped } = splitByExtension(mergePicked([], chosen), accepts);
     if (skipped.length) problems.push(`Left out (not a supported file): ${skipped.slice(0, 5).map((s) => baseName(s.path)).join(", ")}${skipped.length > 5 ? ` and ${skipped.length - 5} more` : ""}`);
-    for (const { file, path } of accepted) {
+    // three at a time: a long list is much quicker than one by one (the server handles them side by side)
+    await runPool(accepted, PARALLEL_UPLOADS, async ({ file, path }) => {
       const key = (uploadKey += 1);
       setUploads((list) => [...list, { key, name: path, fraction: 0 }]);
       try {
         const result = await uploadAsset(project.id, file, folderOf(path), (f) => setUploads((list) => list.map((u) => (u.key === key ? { ...u, fraction: f } : u)))).promise;
-        onProject(result.project);
         result.rejected.forEach((r) => problems.push(`${r.name}: ${r.reason}`));
         setUploads((list) => list.filter((u) => u.key !== key));
       } catch (e) {
         const message = e instanceof ApiError ? e.message : "Upload failed.";
         setUploads((list) => list.map((u) => (u.key === key ? { ...u, error: message } : u)));
       }
+    });
+    // each answer only knew about the files finished by then, and they can arrive in any order: ask once for the real list
+    try {
+      onProject(await getProject(project.id));
+    } catch {
+      /* the list refreshes on the next change */
     }
     if (problems.length) setNotice(problems.join("\n"));
   }
