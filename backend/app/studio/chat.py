@@ -6,7 +6,7 @@ are clamped, fonts must exist, and anything the account's plan doesn't include i
 It cannot run code or reach files; the user's text is treated as the thing to edit from, never as rules.
 
 What lets it "read the names": every uploaded file is listed to the AI with its folder and file name, so a
-folder called "Vidal" or a file called "VO 3.mp3" is enough to know what belongs where.
+folder called "Juan Dela Cruz" or a file called "intro.mp3" is enough to know what belongs where.
 """
 
 from __future__ import annotations

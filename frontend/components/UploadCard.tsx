@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MAX_INSTRUCTIONS, MAX_UPLOAD_MB, formatBytes, getMusic, type EditSettings } from "@/lib/api";
+import { MAX_INSTRUCTIONS, formatBytes, getMusic, getUploadConfig, type EditSettings } from "@/lib/api";
 import { VIDEO_EXTENSIONS, baseName, folderOf, fromFileList, mergePicked, safeFromDataTransfer, splitByExtension, type Picked } from "@/lib/pickFiles";
 
 type Props = {
@@ -22,7 +22,8 @@ const MAX_BATCH = 100;
 /** Why a file can't be used, or null. */
 function problemWith(item: Picked): string | null {
   if (item.file.size === 0) return "it is empty";
-  if (item.file.size > MAX_UPLOAD_MB * 1024 * 1024) return `it is over ${MAX_UPLOAD_MB} MB`;
+  const maxMb = getUploadConfig().maxMb;
+  if (item.file.size > maxMb * 1024 * 1024) return `it is over ${maxMb} MB`;
   return null;
 }
 
@@ -180,7 +181,7 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
           </button>
         </div>
         <p className="mt-2 text-xs text-white/40">
-          MP4, MOV, M4V, MKV or WebM · up to {MAX_UPLOAD_MB} MB each · many at once are edited one after another
+          MP4, MOV, M4V, MKV or WebM · up to {getUploadConfig().maxMb} MB each · many at once are edited one after another
         </p>
       </div>
 

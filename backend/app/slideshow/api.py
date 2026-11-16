@@ -25,6 +25,7 @@ from ..auth import (
     spend_quota,
 )
 from ..config import get_settings
+from ..filenames import keep_extension
 from ..services import media
 from . import images, store
 from .schemas import (
@@ -192,7 +193,7 @@ def _audio_duration(path: FsPath) -> float | None:
 def upload_music(project_id: str = PROJECT_ID, file: UploadFile = File(...), user: User = Depends(current_user)) -> dict[str, Any]:
     project = _project_or_404(project_id, user)
     _editable(project)
-    name = (file.filename or "music").replace("\\", "/").rsplit("/", 1)[-1][:120]
+    name = keep_extension((file.filename or "music").replace("\\", "/").rsplit("/", 1)[-1])
     suffix = FsPath(name).suffix.lower()
     if suffix not in MUSIC_SUFFIXES:
         raise HTTPException(status_code=415, detail="Use an MP3, WAV, M4A, AAC, OGG or FLAC file.")

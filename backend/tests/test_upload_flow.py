@@ -30,7 +30,9 @@ def _wait_done(client: TestClient, job_id: str, timeout: float = 30) -> dict:
 def test_health(client: TestClient):
     r = client.get("/api/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "ffmpeg": True, "auth_required": False, "signup_open": False}  # local use: no login
+    # local use: no login, and no piece size (files go up in one request)
+    assert r.json() == {"status": "ok", "ffmpeg": True, "auth_required": False, "signup_open": False,
+                        "upload": {"max_mb": 5, "chunk_mb": None}}
 
 
 def test_upload_and_prepare(client: TestClient, sample_video: Path):

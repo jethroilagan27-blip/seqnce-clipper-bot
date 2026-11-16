@@ -21,9 +21,17 @@ Job ids are 32-char lowercase hex; anything else returns `422`. Responses never 
 ## POST /api/videos/upload
 `multipart/form-data`:
 - `file` (required) – `.mp4`, ≤ `MAX_UPLOAD_MB`, ≤ `MAX_VIDEO_DURATION_S`, must start with an MP4 `ftyp` box and pass ffprobe.
+- `upload_id` – instead of `file`: a finished upload in pieces (below).
 - `target_duration` int 15–90 (default 45), `captions` bool (true), `remove_silence` bool (true), `background_music` bool (false), `music_track` string (optional), `hook` bool (true – big title at the top for the first ~4 s), `instructions` string (optional, free text for the AI editor; whitespace-normalised and capped at 500 chars).
 
 `201` → `{ "job_id": "…" }`
+
+## Uploads in pieces (`/api/uploads`)
+Used by the website only when `GET /api/health` reports `upload.chunk_mb` (a number; it is `null` on your own computer, where files go up in one request). It exists for setups where a proxy refuses a single request over a size (Cloudflare free: 100 MB).
+1. `POST /api/uploads` `{ purpose: "video" | "studio", name, size, params }` (`params.project_id` for Studio). The same checks as the normal upload run **before** any data is sent (login, daily limit, project, file type, size). `201` → `{ upload_id, chunk_bytes, pieces }`.
+2. `PUT /api/uploads/{upload_id}/{index}` – the raw bytes of piece `index`, exactly `chunk_bytes` long (the last one shorter). `204`. Send again to replace; `GET /api/uploads/{upload_id}` → `{ pieces, received: [...] }` to carry on after a dropped connection.
+3. `POST /api/videos/upload` with `upload_id` (and the usual settings) or `POST /api/studio/projects/{id}/assets/from-upload` `{ upload_id, folder }`. A missing piece answers `409`. The pieces are put back together on the server, checked like any upload, then deleted.
+4. `DELETE /api/uploads/{upload_id}` gives up. Unfinished uploads are deleted after 12 hours; one person can have 6 at a time. Someone else's upload id answers `404`.
 Errors: `413` too large/long · `415` not an mp4 · `422` unreadable video / bad settings.
 
 ## GET /api/jobs/{id}

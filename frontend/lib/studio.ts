@@ -1,6 +1,7 @@
 // Studio client: the API calls. The document types and the pure helpers live in studioDoc.ts (re-exported here).
 
-import { API_URL, ApiError, authedFetch, currentAuthToken, errorMessage, mediaUrl } from "@/lib/api";
+import { API_URL, ApiError, authedFetch, currentAuthToken, errorMessage, getUploadConfig, mediaUrl, uploadInPieces } from "@/lib/api";
+import { shouldChunk } from "@/lib/chunked";
 import type { Asset, AssetKind, StudioDoc } from "./studioDoc.ts";
 
 export * from "./studioDoc.ts";
@@ -88,6 +89,16 @@ export const undoChat = (id: string) => call<ChatState>(`/api/studio/projects/${
 
 /** Upload one file with progress (fetch can't report upload progress). `folder` is where it came from ("Members/Vidal"), or "". */
 export function uploadAsset(id: string, file: File, folder: string, onProgress: (fraction: number) => void): { promise: Promise<UploadResult>; abort: () => void } {
+  if (shouldChunk(file.size, getUploadConfig())) {
+    // Public setup, file bigger than one request may be: send it in pieces, then one small request adds it to the project.
+    const pieces = uploadInPieces(file, "studio", { project_id: id }, (f) => onProgress(f * 0.97));
+    const promise = pieces.promise.then(async (uploadId) => {
+      const added = await call<UploadResult>(`/api/studio/projects/${id}/assets/from-upload`, json("POST", { upload_id: uploadId, folder }));
+      onProgress(1);
+      return added;
+    });
+    return { promise, abort: pieces.abort };
+  }
   const xhr = new XMLHttpRequest();
   const promise = new Promise<UploadResult>((resolve, reject) => {
     xhr.open("POST", `${API_URL}/api/studio/projects/${id}/assets`);

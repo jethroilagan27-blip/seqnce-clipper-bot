@@ -78,7 +78,13 @@ def _to_user(row: dict[str, Any]) -> User:
 
 def features_of(user: User) -> dict[str, Any]:
     """What this account may use: its plan plus its own overrides (admins and local use: everything)."""
-    return features.resolve(user.plan, user.overrides, admin=user.is_admin or not get_settings().auth_enabled)
+    cfg = get_settings()
+    everything = user.is_admin or not cfg.auth_enabled
+    values = features.resolve(user.plan, user.overrides, admin=everything)
+    # The biggest single file follows the server's own upload limit (MAX_UPLOAD_MB: 500 on your own computer, 95 on the
+    # public setup because Cloudflare refuses a request over 100 MB). Admins and local use get all of it; a plan can only lower it.
+    values["studio_max_file_mb"] = cfg.max_upload_mb if everything else min(int(values["studio_max_file_mb"]), cfg.max_upload_mb)
+    return values
 
 
 def require_feature(user: User, key: str, message: str | None = None) -> dict[str, Any]:

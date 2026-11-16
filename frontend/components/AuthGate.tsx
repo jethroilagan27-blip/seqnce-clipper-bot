@@ -5,6 +5,7 @@ import {
   JOB_STORAGE_KEY,
   getHealth,
   getMe,
+  setUploadConfig,
   loadStoredToken,
   logout,
   setAuthToken,
@@ -68,6 +69,7 @@ export default function AuthGate({ children }: { children: (account: AccountInfo
       try {
         const health = await getHealth();
         if (cancelled) return;
+        setUploadConfig(health.upload); // piece size (public setup only) and the biggest file
         setRequired(health.auth_required);
         setSignupOpen(Boolean(health.signup_open));
         if (!health.auth_required) {

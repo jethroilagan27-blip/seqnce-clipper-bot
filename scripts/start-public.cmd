@@ -17,13 +17,16 @@ if not exist "%TOKEN_FILE%" echo The tunnel token file is missing: see docs\DEPL
 echo Make sure the normal dev servers (scripts\dev-*.cmd, ports 3000 and 8000) are stopped first.
 echo.
 
-rem 1) backend: accounts on, only the public site may call it, uploads kept under Cloudflare's 100 MB limit
+rem 1) backend: accounts on, only the public site may call it.
+rem    Cloudflare's free plan refuses any single request over 100 MB: PROXY_REQUEST_LIMIT_MB=100 tells the website to send
+rem    bigger files in pieces of 50 MB (this is set ONLY here: on your own computer, files go up in one request).
+rem    MAX_UPLOAD_MB is the biggest single file once it is put back together.
 rem    OPEN_SIGNUP=true lets anyone create an account (email + password, no invite code; capped per visitor and per day).
 rem    Set it to false to go back to invite-only (invite codes: python -m app.admin invite).
-start "Seqnce backend (public)" cmd /k "set AUTH_ENABLED=true&& set OPEN_SIGNUP=true&& set CORS_ORIGINS=%PUBLIC_APP%&& set MAX_UPLOAD_MB=95&& cd backend&& ..\tools\uv\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8000"
+start "Seqnce backend (public)" cmd /k "set AUTH_ENABLED=true&& set OPEN_SIGNUP=true&& set CORS_ORIGINS=%PUBLIC_APP%&& set PROXY_REQUEST_LIMIT_MB=100&& set MAX_UPLOAD_MB=1500&& cd backend&& ..\tools\uv\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8000"
 
-rem 2) website: built for the public address, then served
-start "Seqnce website (public)" cmd /k "cd frontend&& set NEXT_PUBLIC_API_URL=%PUBLIC_API%&& set NEXT_PUBLIC_MAX_UPLOAD_MB=95&& npm run build&& npm run start -- -p 3000"
+rem 2) website: built for the public address, then served (it learns the upload limits from the backend)
+start "Seqnce website (public)" cmd /k "cd frontend&& set NEXT_PUBLIC_API_URL=%PUBLIC_API%&& npm run build&& npm run start -- -p 3000"
 
 rem 3) the tunnel that makes both reachable from the internet (the token is read from a git-ignored file)
 set /p TUNNEL_TOKEN=<"%TOKEN_FILE%"

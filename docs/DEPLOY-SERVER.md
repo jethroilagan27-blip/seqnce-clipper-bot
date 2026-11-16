@@ -87,7 +87,8 @@ GEMINI_MODEL=gemini-3.5-flash
 AUTH_ENABLED=true
 OPEN_SIGNUP=true
 CORS_ORIGINS=https://seqnce.orbitrixhq.com
-MAX_UPLOAD_MB=95
+PROXY_REQUEST_LIMIT_MB=100
+MAX_UPLOAD_MB=1500
 RETENTION_DAYS=7
 WHISPER_MODEL=small
 WHISPER_DEVICE=cpu
@@ -101,8 +102,8 @@ nano /opt/seqnce/frontend/.env.production.local
 ```
 ```
 NEXT_PUBLIC_API_URL=https://seqnce-api.orbitrixhq.com
-NEXT_PUBLIC_MAX_UPLOAD_MB=95
 ```
+(`PROXY_REQUEST_LIMIT_MB=100` above is because Cloudflare's free plan refuses any request over 100 MB: the website then sends bigger files in 50 MB pieces. If you ever serve the app without Cloudflare in front, leave that line out and files go up in one request.)
 Build it (takes a few minutes):
 ```bash
 cd /opt/seqnce/frontend && npm ci && npm run build

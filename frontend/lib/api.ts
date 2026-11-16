@@ -1,10 +1,19 @@
 // Thin client for the FastAPI backend. The browser talks to it directly (CORS is
 // enabled for localhost:3000) so large uploads don't pass through the Next server.
 
+import { DEFAULT_UPLOAD_CONFIG, PieceError, parseUploadConfig, sendPieces, shouldChunk, type Piece, type UploadConfig } from "./chunked";
 import type { TextOverlay } from "./overlays";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-export const MAX_UPLOAD_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? 500);
+
+// What the server says about uploads (from /api/health, see AuthGate): the biggest file, and, only when something in front
+// of the server limits one request (the public setup), the size of the pieces big files are sent in. On your own computer
+// there is no piece size, so every file goes up in a single request.
+let uploadConfig: UploadConfig = DEFAULT_UPLOAD_CONFIG;
+export const setUploadConfig = (raw: unknown) => {
+  uploadConfig = parseUploadConfig(raw);
+};
+export const getUploadConfig = () => uploadConfig;
 
 export type EditSettings = {
   target_duration: number;
@@ -266,7 +275,13 @@ async function postAuth<T>(path: string, body: unknown): Promise<T> {
   return data as T;
 }
 
-export async function getHealth(): Promise<{ status: string; ffmpeg: boolean; auth_required: boolean; signup_open?: boolean }> {
+export async function getHealth(): Promise<{
+  status: string;
+  ffmpeg: boolean;
+  auth_required: boolean;
+  signup_open?: boolean;
+  upload?: { max_mb: number; chunk_mb: number | null };
+}> {
   const res = await authedFetch("/api/health");
   if (!res.ok) throw new ApiError(`The server answered HTTP ${res.status}.`);
   return res.json();
@@ -284,15 +299,113 @@ export async function getMe(): Promise<{ auth_required: boolean; user: AuthUser;
   return data;
 }
 
+/**
+ * Send a big file in pieces (public setup only: see UploadConfig). Resolves with the upload id to hand to the normal
+ * endpoint instead of the file. `purpose` decides what the server checks before any piece is accepted.
+ */
+export function uploadInPieces(
+  file: File,
+  purpose: "video" | "studio",
+  params: Record<string, string>,
+  onProgress: (fraction: number) => void,
+): { promise: Promise<string>; abort: () => void } {
+  let cancelled = false;
+  let current: XMLHttpRequest | null = null;
+  const promise = (async () => {
+    const res = await authedFetch("/api/uploads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ purpose, name: file.name, size: file.size, params }),
+    });
+    const info = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiError(errorMessage(info, `Upload failed (HTTP ${res.status}).`));
+    const { upload_id: id, chunk_bytes: chunkBytes } = info as { upload_id: string; chunk_bytes: number };
+
+    const putPiece = (piece: Piece, onBytes: (sent: number) => void) =>
+      new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        current = xhr;
+        xhr.open("PUT", `${API_URL}/api/uploads/${id}/${piece.index}`);
+        if (authToken) xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);
+        xhr.upload.onprogress = (e) => e.lengthComputable && onBytes(e.loaded);
+        xhr.onerror = () => reject(new PieceError("Can't reach the server."));
+        xhr.ontimeout = () => reject(new PieceError("The server took too long to answer."));
+        xhr.onabort = () => reject(new PieceError("Upload cancelled.", 499));
+        xhr.onload = () => {
+          if (xhr.status === 401 && authToken) onUnauthorized?.();
+          if (xhr.status >= 200 && xhr.status < 300) return resolve();
+          let body: unknown = null;
+          try {
+            body = JSON.parse(xhr.responseText);
+          } catch {
+            /* a non-JSON error page (e.g. the proxy's) */
+          }
+          reject(new PieceError(errorMessage(body, `Upload failed (HTTP ${xhr.status}).`), xhr.status));
+        };
+        xhr.send(file.slice(piece.start, piece.end));
+      });
+
+    try {
+      await sendPieces({ size: file.size, chunkBytes, putPiece, onProgress, isCancelled: () => cancelled });
+    } catch (error) {
+      void authedFetch(`/api/uploads/${id}`, { method: "DELETE" }).catch(() => {}); // free the half-sent file on the server
+      if (cancelled) throw new ApiError("Upload cancelled.");
+      throw error instanceof PieceError ? new ApiError(error.message) : error;
+    }
+    return id;
+  })();
+  return {
+    promise,
+    abort: () => {
+      cancelled = true;
+      current?.abort();
+    },
+  };
+}
+
 export function uploadVideo(
   file: File,
   settings: EditSettings,
   onProgress: (fraction: number) => void,
 ): { promise: Promise<string>; abort: () => void } {
+  if (shouldChunk(file.size, uploadConfig)) return uploadVideoInPieces(file, settings, onProgress);
+  return postVideoForm(settings, { file }, onProgress);
+}
+
+/** The big-file route: the pieces go first (first 95 % of the bar), then one small request starts the job. */
+function uploadVideoInPieces(file: File, settings: EditSettings, onProgress: (fraction: number) => void) {
+  const pieces = uploadInPieces(file, "video", {}, (f) => onProgress(f * 0.95));
+  let finish: { abort: () => void } | null = null;
+  let aborted = false;
+  const promise = pieces.promise.then((uploadId) => {
+    if (aborted) throw new ApiError("Upload cancelled.");
+    const post = postVideoForm(settings, { uploadId }, () => {});
+    finish = post;
+    return post.promise.then((jobId) => {
+      onProgress(1);
+      return jobId;
+    });
+  });
+  return {
+    promise,
+    abort: () => {
+      aborted = true;
+      pieces.abort();
+      (finish as { abort: () => void } | null)?.abort();
+    },
+  };
+}
+
+function postVideoForm(
+  settings: EditSettings,
+  source: { file: File } | { uploadId: string },
+  onProgress: (fraction: number) => void,
+): { promise: Promise<string>; abort: () => void } {
   const xhr = new XMLHttpRequest();
   const promise = new Promise<string>((resolve, reject) => {
     const form = new FormData();
-    form.append("file", file);
+    if ("file" in source) form.append("file", source.file);
+    else form.append("upload_id", source.uploadId);
     form.append("target_duration", String(settings.target_duration));
     form.append("captions", String(settings.captions));
     form.append("remove_silence", String(settings.remove_silence));

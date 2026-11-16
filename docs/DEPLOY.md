@@ -49,7 +49,7 @@ The invite code is shown once; send it to your tester.
 Keep the laptop **plugged in and set to never sleep** while testers are using it (Windows → Settings → System → Power).
 
 ## Things to know
-- **Upload size:** Cloudflare's free plan rejects any single upload over **100 MB**. The public build limits videos to **95 MB** and sends photos in groups under 60 MB. For longer or higher-resolution videos a chunked upload would be needed.
+- **Upload size:** Cloudflare's free plan rejects any single request over **100 MB**, so the public setup (`PROXY_REQUEST_LIMIT_MB=100`, set by `start-public.cmd`) sends bigger videos and Studio files in **50 MB pieces** that the server puts back together (resumable per piece, unfinished uploads deleted after 12 hours). Files up to `MAX_UPLOAD_MB` (1500 in the public script) work. Photos still go in groups under 60 MB. On your own computer (`dev-backend.cmd`) the setting is absent, so every file goes up in a single request, with no pieces and no 100 MB limit.
 - **Accounts and limits:** the public run turns accounts on: invite-only, everyone sees only their own work, 3 videos and 20 AI chat messages per person per 24 hours (see `.env.example`). Photo videos count as videos.
 - **Your Gemini key pays for every tester's AI calls** and the free tier has its own limits. Watch it in Google AI Studio.
 - **Privacy:** testers' videos are stored on your laptop (deleted automatically after `RETENTION_DAYS`, default 7). The transcript, a few small frames and chat messages are sent to Google's Gemini API. Tell testers.

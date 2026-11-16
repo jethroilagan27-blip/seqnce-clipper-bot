@@ -8,6 +8,7 @@ every route (apart from the files the browser loads itself) needs the "studio" f
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from pathlib import Path as FsPath
 from typing import Any, Literal
@@ -16,9 +17,10 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import auth, uploadguard
+from .. import auth, chunked, uploadguard
 from ..auth import User, can_access, current_user, ensure_quota, media_user, spend_quota
 from ..config import get_settings
+from ..filenames import keep_extension
 from . import chat, engine, ingest, store
 from .schemas import (
     AUDIO_SUFFIXES,
@@ -38,7 +40,8 @@ PROJECT_ID = Path(pattern=r"^[0-9a-f]{32}$", description="Studio project id")
 ASSET_ID = Path(pattern=r"^[0-9a-f]{16}$", description="Studio file id")
 SCENE_ID = r"^[A-Za-z0-9_-]{1,40}$"
 
-uploadguard.register(r"^/api/studio/projects/[0-9a-f]{32}/assets$", lambda: MAX_BATCH_BYTES)
+# one request is usually one file; allow the server's own upload limit plus a little for the form around it
+uploadguard.register(r"^/api/studio/projects/[0-9a-f]{32}/assets$", lambda: max(MAX_BATCH_BYTES, get_settings().max_upload_bytes + 16 * 1024 * 1024))
 
 NO_STUDIO = "Studio isn't included in your plan. Ask the Seqnce team to switch it on for your account."
 
@@ -200,47 +203,96 @@ def upload_assets(
     feats = _feats(user)
     project = _project_or_404(project_id, user)
     _editable(project)
-    base = store.project_dir(project_id)
-    max_file = feats["studio_max_file_mb"] * 1024 * 1024
     added: list[dict[str, Any]] = []
     rejected: list[dict[str, str]] = []
-    count, used = store.asset_totals(project_id)
     for index, f in enumerate(files):
-        name = (f.filename or "file").replace("\\", "/").rsplit("/", 1)[-1][:120]
+        name = keep_extension((f.filename or "file").replace("\\", "/").rsplit("/", 1)[-1])  # long names keep their ".mp4"
         folder = ingest.clean_folder(folders[index] if index < len(folders) else "")
-        if count >= feats["studio_max_assets"]:
-            rejected.append({"name": name, "reason": f"A project holds at most {feats['studio_max_assets']} files."})
-            continue
-        if ingest.kind_of(name) == "font" and not feats["studio_custom_fonts"]:
-            rejected.append({"name": name, "reason": "Uploading your own fonts isn't included in your plan."})
-            continue
-        room = feats["studio_max_storage_mb"] * 1024 * 1024 - used
-        if room <= 0:
-            rejected.append({"name": name, "reason": f"This project is full ({feats['studio_max_storage_mb']} MB). Delete files you don't use."})
-            continue
-        asset_id = uuid.uuid4().hex[:16]  # server-made name: nothing from the client reaches the file system
-        try:
-            got = ingest.ingest(f.file, name, base, asset_id, min(max_file, room))
-        except ingest.AssetError as exc:
-            rejected.append({"name": name, "reason": str(exc)})
-            continue
-        # Uploads arrive side by side (the page sends three at once): the numbers read at the start of this request may be
-        # out of date, so the limits are checked again, atomically, at the moment the file is kept.
-        refused = store.add_asset(
-            project_id, asset_id, got.kind, name, got.file, width=got.width, height=got.height, duration=got.duration,
-            has_audio=got.has_audio, size_bytes=got.size_bytes, folder=folder,
-            max_count=feats["studio_max_assets"], max_bytes=feats["studio_max_storage_mb"] * 1024 * 1024,
-        )
-        if refused:
-            (base / "assets" / got.file).unlink(missing_ok=True)
-            (base / "thumbs" / f"{asset_id}.jpg").unlink(missing_ok=True)
-            rejected.append({"name": name, "reason": (f"A project holds at most {feats['studio_max_assets']} files." if refused == "count"
-                                                      else f"This project is full ({feats['studio_max_storage_mb']} MB). Delete files you don't use.")})
-            continue
-        count += 1
-        used += got.size_bytes
-        added.append({"id": asset_id, "kind": got.kind, "name": name, "folder": folder})
+        result = _add_one(project_id, feats, f.file, name, folder)
+        if "reason" in result:
+            rejected.append(result)
+        else:
+            added.append(result)
     return {"added": added, "rejected": rejected, "project": _out(store.get(project_id) or {}, feats)}
+
+
+def _add_one(project_id: str, feats: dict[str, Any], fileobj: Any, name: str, folder: str) -> dict[str, Any]:
+    """Check, store and register one file. Returns the added file, or {"name", "reason"} when it was refused."""
+    base = store.project_dir(project_id)
+    count, used = store.asset_totals(project_id)
+    if count >= feats["studio_max_assets"]:
+        return {"name": name, "reason": f"A project holds at most {feats['studio_max_assets']} files."}
+    if ingest.kind_of(name) == "font" and not feats["studio_custom_fonts"]:
+        return {"name": name, "reason": "Uploading your own fonts isn't included in your plan."}
+    room = feats["studio_max_storage_mb"] * 1024 * 1024 - used
+    if room <= 0:
+        return {"name": name, "reason": f"This project is full ({feats['studio_max_storage_mb']} MB). Delete files you don't use."}
+    asset_id = uuid.uuid4().hex[:16]  # server-made name: nothing from the client reaches the file system
+    try:
+        got = ingest.ingest(fileobj, name, base, asset_id, min(feats["studio_max_file_mb"] * 1024 * 1024, room))
+    except ingest.AssetError as exc:
+        return {"name": name, "reason": str(exc)}
+    # Uploads arrive side by side (the page sends three at once): the numbers read above may be out of date,
+    # so the limits are checked again, atomically, at the moment the file is kept.
+    refused = store.add_asset(
+        project_id, asset_id, got.kind, name, got.file, width=got.width, height=got.height, duration=got.duration,
+        has_audio=got.has_audio, size_bytes=got.size_bytes, folder=folder,
+        max_count=feats["studio_max_assets"], max_bytes=feats["studio_max_storage_mb"] * 1024 * 1024,
+    )
+    if refused:
+        (base / "assets" / got.file).unlink(missing_ok=True)
+        (base / "thumbs" / f"{asset_id}.jpg").unlink(missing_ok=True)
+        return {"name": name, "reason": (f"A project holds at most {feats['studio_max_assets']} files." if refused == "count"
+                                         else f"This project is full ({feats['studio_max_storage_mb']} MB). Delete files you don't use.")}
+    return {"id": asset_id, "kind": got.kind, "name": name, "folder": folder}
+
+
+class FromUploadBody(BaseModel):
+    upload_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    folder: str = Field(default="", max_length=400)
+
+
+@router.post("/projects/{project_id}/assets/from-upload")
+def add_asset_from_upload(body: FromUploadBody, project_id: str = PROJECT_ID, user: User = Depends(current_user)) -> dict[str, Any]:
+    """Add a file the page sent in pieces (see chunked.py). Same checks as a normal upload."""
+    feats = _feats(user)
+    project = _project_or_404(project_id, user)
+    _editable(project)
+    taken = chunked.take(user, body.upload_id, "studio")
+    try:
+        if taken.params.get("project_id") != project_id:
+            raise HTTPException(status_code=422, detail="This upload was made for another project.")
+        with taken.path.open("rb") as fileobj:
+            name = keep_extension(taken.name.replace("\\", "/").rsplit("/", 1)[-1])  # a label only, never a path
+            result = _add_one(project_id, feats, fileobj, name, ingest.clean_folder(body.folder))
+    finally:
+        chunked.discard(taken.id)
+    return {"added": [] if "reason" in result else [result], "rejected": [result] if "reason" in result else [],
+            "project": _out(store.get(project_id) or {}, feats)}
+
+
+def _check_chunked_upload(user: User, params: dict[str, Any], name: str, size: int) -> int:
+    """Called when the page announces a big file, before any of it is sent: may this person add it to this project?"""
+    feats = _feats(user)
+    project_id = str(params.get("project_id", ""))
+    if not re.fullmatch(r"[0-9a-f]{32}", project_id):
+        raise HTTPException(status_code=422, detail="Unknown project.")
+    _editable(_project_or_404(project_id, user))
+    count, used = store.asset_totals(project_id)
+    if count >= feats["studio_max_assets"]:
+        raise HTTPException(status_code=409, detail=f"A project holds at most {feats['studio_max_assets']} files.")
+    kind = ingest.kind_of(name)
+    if kind is None:
+        raise HTTPException(status_code=415, detail="Use a video (MP4, MOV, MKV, WebM), an audio file or a picture.")
+    if kind == "font" and not feats["studio_custom_fonts"]:
+        raise HTTPException(status_code=403, detail="Uploading your own fonts isn't included in your plan.")
+    room = feats["studio_max_storage_mb"] * 1024 * 1024 - used
+    if room <= 0:
+        raise HTTPException(status_code=409, detail=f"This project is full ({feats['studio_max_storage_mb']} MB). Delete files you don't use.")
+    return min(feats["studio_max_file_mb"] * 1024 * 1024, room)
+
+
+chunked.register("studio", _check_chunked_upload)
 
 
 @router.delete("/projects/{project_id}/assets/{asset_id}")

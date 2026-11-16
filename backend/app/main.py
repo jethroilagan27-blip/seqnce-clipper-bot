@@ -12,9 +12,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import auth, db, slideshow, studio, uploadguard  # slideshow = photo mode, studio = Studio (both self-contained, see their docstrings)
+from . import auth, chunked, db, slideshow, studio, uploadguard  # slideshow = photo mode, studio = Studio (both self-contained, see their docstrings)
 from .api import auth as auth_api
-from .api import jobs, music, videos
+from .api import jobs, music, uploads, videos
 from .config import get_settings
 from .retention import purge_old_jobs
 from .worker import Worker
@@ -32,6 +32,7 @@ def create_app() -> FastAPI:
         db.init_db()
         db.purge_auth()
         purge_old_jobs(cfg.retention_days)
+        chunked.purge_stale()  # half-finished uploads from before a restart
         worker = Worker()
         worker.start()
         slideshow.start()  # photo mode
@@ -83,9 +84,15 @@ def create_app() -> FastAPI:
             ffmpeg_ok = media.run_tool([cfg.ffmpeg, "-version"], timeout=10).returncode == 0
         except media.MediaError:
             ffmpeg_ok = False
-        return {"status": "ok", "ffmpeg": ffmpeg_ok, "auth_required": cfg.auth_enabled, "signup_open": cfg.auth_enabled and cfg.open_signup}
+        return {
+            "status": "ok", "ffmpeg": ffmpeg_ok, "auth_required": cfg.auth_enabled, "signup_open": cfg.auth_enabled and cfg.open_signup,
+            # chunk_mb is null on your own computer (files go up in one piece); a number when something in front of the
+            # server limits one request (the public setup): the page then sends bigger files in pieces of that size.
+            "upload": {"max_mb": cfg.max_upload_mb, "chunk_mb": cfg.chunk_mb},
+        }
 
     app.include_router(auth_api.router)
+    app.include_router(uploads.router)
     app.include_router(videos.router)
     app.include_router(jobs.router)
     app.include_router(music.router)

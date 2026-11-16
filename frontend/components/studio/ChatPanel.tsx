@@ -41,13 +41,6 @@ export default function ChatPanel({ messages, canUndo, thinking, locked, error, 
         <p className="text-xs text-white/40">Reads your file and folder names. Uses one of your daily AI messages each time.</p>
       </div>
 
-      {messages.length === 0 && (
-        <p className="rounded-lg border border-dashed border-white/15 px-4 py-4 text-sm text-white/50">
-          Paste your script here and it will build the scenes from your files: it matches each part of the script to the files by their folder and file names (a folder called “Vidal”, a file called
-          “VO 3”). Afterwards, tell it what to change, for example “make scene 4 longer” or “use the poster in the Origin scene”.
-        </p>
-      )}
-
       {messages.length > 0 && (
         <ul className="max-h-96 space-y-2 overflow-y-auto pr-1" aria-label="Chat with the assistant" aria-live="polite">
           {messages.map((m, i) => (
@@ -81,7 +74,7 @@ export default function ChatPanel({ messages, canUndo, thinking, locked, error, 
           }
         }}
         aria-label="Message for the assistant"
-        placeholder="Paste your script, or tell the assistant what to change…"
+        placeholder="Type your instructions here or tell the assistant what to change…"
         className="w-full rounded-lg border border-white/10 bg-[#15151c] px-3 py-2 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none disabled:opacity-50"
       />
       <div className="flex flex-wrap items-center gap-2">

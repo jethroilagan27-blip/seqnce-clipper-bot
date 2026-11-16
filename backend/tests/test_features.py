@@ -135,6 +135,31 @@ def test_require_feature_says_403_when_it_is_off(ac: TestClient):
     assert auth.require_feature(auth._to_user(db.get_user(user.id)), "studio")["studio"] is True  # type: ignore[arg-type]
 
 
+def test_the_biggest_file_follows_the_servers_upload_limit_not_a_fixed_number(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    """On your own computer there is no reason for Studio to refuse a 300 MB phone video the server itself accepts."""
+    limit = get_settings().max_upload_mb  # the test server's MAX_UPLOAD_MB
+    me = client.get("/api/auth/me").json()["user"]  # accounts off: local use
+    assert me["features"]["studio_max_file_mb"] == limit != features.PLANS["pro"]["studio_max_file_mb"]
+    assert client.get("/api/studio/info").json()["limits"]["max_file_mb"] == limit
+
+    monkeypatch.setenv("MAX_UPLOAD_MB", "500")  # the normal local setting
+    get_settings.cache_clear()
+    admin_user = auth.User(id=1, email="a@x.co", is_admin=True)
+    pro = auth.User(id=2, email="p@x.co", is_admin=False, plan="pro")
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    get_settings.cache_clear()
+    assert auth.features_of(admin_user)["studio_max_file_mb"] == 500  # admins: all of it
+    assert auth.features_of(pro)["studio_max_file_mb"] == min(features.PLANS["pro"]["studio_max_file_mb"], 500)  # a plan can only lower it
+    monkeypatch.setenv("MAX_UPLOAD_MB", "5000")  # the public setup: the plan is what limits a normal account
+    get_settings.cache_clear()
+    assert auth.features_of(pro)["studio_max_file_mb"] == features.PLANS["pro"]["studio_max_file_mb"]
+    assert auth.features_of(admin_user)["studio_max_file_mb"] == 5000
+    monkeypatch.setenv("MAX_UPLOAD_MB", "50")  # a server that accepts less than the plan says
+    get_settings.cache_clear()
+    assert auth.features_of(pro)["studio_max_file_mb"] == 50 and auth.features_of(admin_user)["studio_max_file_mb"] == 50
+    get_settings.cache_clear()
+
+
 def test_with_accounts_off_everyone_has_everything(client: TestClient):
     me = client.get("/api/auth/me").json()["user"]
     assert me["features"]["studio"] is True and me["quota"]["studio"]["limit"] is None

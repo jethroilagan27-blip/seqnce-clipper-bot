@@ -7,14 +7,16 @@ import re
 import threading
 import uuid
 from pathlib import Path as FsPath
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
-from .. import db, stages, uploadguard
+from .. import chunked, db, stages, uploadguard
 from ..auth import User, current_user, ensure_no_other_active_job, ensure_quota, media_user, spend_quota
 from ..config import get_settings
+from ..filenames import keep_extension
 from ..pipeline import prepare
 from ..plan.text import clean_instructions
 from ..schemas import EditSettings, UploadResponse
@@ -49,17 +51,30 @@ def _display_name(raw: str | None) -> str:
     """Client filename -> safe label for the UI only (never used as a path)."""
     name = (raw or "video.mp4").replace("\\", "/").rsplit("/", 1)[-1]
     name = re.sub(r"[^\w .()\-]", "_", name).strip() or "video.mp4"
-    return name[:120]
+    return keep_extension(name)  # a long download name must not lose its ".mp4" (the file would be refused as "not a video")
 
 
 def _too_large(limit_mb: int) -> HTTPException:
     return HTTPException(status_code=413, detail=f"File is larger than {limit_mb} MB.")
 
 
+def _check_chunked_upload(user: User, params: dict[str, Any], name: str, size: int) -> int:
+    """Called when the page announces a big video, before any of it is sent."""
+    ensure_quota(user, "video")
+    ensure_no_other_active_job(user)
+    if FsPath(_display_name(name)).suffix.lower() not in ALLOWED_SUFFIXES:
+        raise HTTPException(status_code=415, detail="Use a video file: MP4, MOV, M4V, MKV or WebM.")
+    return get_settings().max_upload_bytes
+
+
+chunked.register("video", _check_chunked_upload)
+
+
 @router.post("/upload", response_model=UploadResponse, status_code=201)
 def upload_video(
     request: Request,
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    upload_id: str = Form(""),  # a finished chunked upload (see chunked.py) instead of `file`
     target_duration: int = Form(45),
     captions: bool = Form(True),
     remove_silence: bool = Form(True),
@@ -86,31 +101,71 @@ def upload_video(
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="Invalid editing settings") from exc
 
-    display_name = _display_name(file.filename)
-    suffix = FsPath(display_name).suffix.lower()
-    if suffix not in ALLOWED_SUFFIXES:
-        raise HTTPException(status_code=415, detail="Use a video file: MP4, MOV, M4V, MKV or WebM.")
+    taken = chunked.take(user, upload_id, "video") if upload_id else None  # the pieces, put back together
+    try:
+        if taken is None and file is None:
+            raise HTTPException(status_code=422, detail="No video was sent.")
+        display_name = _display_name(taken.name if taken else file.filename)  # type: ignore[union-attr]
+        suffix = FsPath(display_name).suffix.lower()
+        if suffix not in ALLOWED_SUFFIXES:
+            raise HTTPException(status_code=415, detail="Use a video file: MP4, MOV, M4V, MKV or WebM.")
 
-    declared = request.headers.get("content-length")
-    if declared and declared.isdigit() and int(declared) > cfg.max_upload_bytes + CHUNK:
-        raise _too_large(cfg.max_upload_mb)
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > cfg.max_upload_bytes + CHUNK:
+            raise _too_large(cfg.max_upload_mb)
 
-    job_id = uuid.uuid4().hex
-    dest = cfg.uploads_dir / f"{job_id}{suffix}"  # server-generated name (the extension comes from our own list): no traversal possible
+        job_id = uuid.uuid4().hex
+        dest = cfg.uploads_dir / f"{job_id}{suffix}"  # server-generated name (the extension comes from our own list): no traversal possible
+        info, written = _store_and_probe(taken, file, dest, suffix, cfg)
+        try:
+            spend_quota(user, "video")  # last check, atomic: parallel uploads can't slip past the limit
+        except BaseException:
+            dest.unlink(missing_ok=True)
+            raise
+    except BaseException:
+        if taken is not None:
+            chunked.discard(taken.id)
+        raise
+    if taken is not None:
+        chunked.discard(taken.id)
 
+    db.create_job(
+        job_id=job_id,
+        original_filename=display_name,
+        upload_path=str(dest),
+        settings=edit_settings.model_dump(),
+        metadata=info.to_dict(),
+        user_id=user.id if cfg.auth_enabled else None,
+    )
+    log.info("job %s: uploaded %s (%.1f MB, %.1fs)", job_id, display_name, written / 1e6, info.duration)
+    return UploadResponse(job_id=job_id)
+
+
+def _store_and_probe(taken: chunked.Taken | None, file: UploadFile | None, dest: FsPath, suffix: str, cfg: Any) -> tuple[Any, int]:
+    """Put the video at `dest` (from the upload or the pieces), check it, and return (probe info, bytes). Leaves nothing on failure."""
     written = 0
     try:
-        with dest.open("wb") as out:
-            first = True
-            while chunk := file.file.read(CHUNK):
-                if first:
-                    if not _looks_like_video(suffix, chunk[:16]):
-                        raise HTTPException(status_code=415, detail=f"This doesn't look like a {suffix[1:].upper()} video file.")
-                    first = False
-                written += len(chunk)
-                if written > cfg.max_upload_bytes:
-                    raise _too_large(cfg.max_upload_mb)
-                out.write(chunk)
+        if taken is not None:
+            with taken.path.open("rb") as head_in:
+                if not _looks_like_video(suffix, head_in.read(16)):
+                    raise HTTPException(status_code=415, detail=f"This doesn't look like a {suffix[1:].upper()} video file.")
+            written = taken.size
+            if written > cfg.max_upload_bytes:
+                raise _too_large(cfg.max_upload_mb)
+            taken.path.replace(dest)  # same disk: no copy
+        else:
+            assert file is not None
+            with dest.open("wb") as out:
+                first = True
+                while chunk := file.file.read(CHUNK):
+                    if first:
+                        if not _looks_like_video(suffix, chunk[:16]):
+                            raise HTTPException(status_code=415, detail=f"This doesn't look like a {suffix[1:].upper()} video file.")
+                        first = False
+                    written += len(chunk)
+                    if written > cfg.max_upload_bytes:
+                        raise _too_large(cfg.max_upload_mb)
+                    out.write(chunk)
         if written == 0:
             raise HTTPException(status_code=422, detail="The uploaded file is empty.")
 
@@ -123,21 +178,10 @@ def upload_video(
                 status_code=413,
                 detail=f"Video is longer than {cfg.max_video_duration_s // 60} minutes.",
             )
-        spend_quota(user, "video")  # last check, atomic: parallel uploads can't slip past the limit
     except BaseException:
         dest.unlink(missing_ok=True)
         raise
-
-    db.create_job(
-        job_id=job_id,
-        original_filename=display_name,
-        upload_path=str(dest),
-        settings=edit_settings.model_dump(),
-        metadata=info.to_dict(),
-        user_id=user.id if cfg.auth_enabled else None,
-    )
-    log.info("job %s: uploaded %s (%.1f MB, %.1fs)", job_id, display_name, written / 1e6, info.duration)
-    return UploadResponse(job_id=job_id)
+    return info, written
 
 
 VERSION = Query(None, ge=1, description="Version number; omit for the current one")

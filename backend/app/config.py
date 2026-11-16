@@ -25,7 +25,11 @@ class Settings(BaseSettings):
     ffprobe_path: str = ""
 
     # --- upload limits -----------------------------------------------------
-    max_upload_mb: int = 500
+    max_upload_mb: int = 500  # the biggest single file the server accepts (one video, one Studio file)
+    # 0 = nothing in front of the server limits a request (your own computer): files are always sent in one piece.
+    # >0 = a proxy such as Cloudflare refuses any single request over this many MB (its free plan: 100): the page then
+    # sends bigger files in pieces. Only the public start script sets it.
+    proxy_request_limit_mb: int = 0
     max_video_duration_s: int = 30 * 60
     retention_days: int = 7  # finished jobs older than this are deleted at startup (0 = keep forever)
 
@@ -64,6 +68,18 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
+
+    @property
+    def chunk_mb(self) -> int | None:
+        """Size of one piece when files must be sent in pieces; None when they are sent whole (no proxy limit)."""
+        if self.proxy_request_limit_mb <= 0:
+            return None
+        return max(1, min(50, self.proxy_request_limit_mb - 10))  # a safe margin under the proxy's limit for the request around the piece
+
+    @property
+    def chunk_bytes(self) -> int:
+        """Piece size the server uses when a client asks for a chunked upload (50 MB when no proxy limit is configured)."""
+        return (self.chunk_mb or 50) * 1024 * 1024
 
     @property
     def db_path(self) -> Path:
