@@ -25,6 +25,7 @@ export type Limits = {
   ducking: boolean;
   auto_montage: boolean;
   custom_fonts: boolean;
+  ai_chat: boolean;
   max_visuals_per_scene: number;
 };
 export type Project = {
@@ -77,8 +78,16 @@ export const deleteAsset = (id: string, assetId: string) => call<Project>(`/api/
 export const startRender = (id: string, kind: "final" | "preview", sceneId: string | null) =>
   call<Project>(`/api/studio/projects/${id}/render`, json("POST", { kind, scene_id: sceneId }));
 
-/** Upload one file with progress (fetch can't report upload progress). */
-export function uploadAsset(id: string, file: File, onProgress: (fraction: number) => void): { promise: Promise<UploadResult>; abort: () => void } {
+export type ChatMessage = { role: "user" | "assistant"; text: string; created_at: string };
+export type ChatState = { messages: ChatMessage[]; can_undo: boolean; project: Project };
+
+export const getChat = (id: string) => call<ChatState>(`/api/studio/projects/${id}/chat`);
+/** The assistant can take up to a minute: it reads every file name and writes the scenes. */
+export const sendChat = (id: string, message: string) => call<ChatState>(`/api/studio/projects/${id}/chat`, json("POST", { message }));
+export const undoChat = (id: string) => call<ChatState>(`/api/studio/projects/${id}/chat/undo`, { method: "POST" });
+
+/** Upload one file with progress (fetch can't report upload progress). `folder` is where it came from ("Members/Vidal"), or "". */
+export function uploadAsset(id: string, file: File, folder: string, onProgress: (fraction: number) => void): { promise: Promise<UploadResult>; abort: () => void } {
   const xhr = new XMLHttpRequest();
   const promise = new Promise<UploadResult>((resolve, reject) => {
     xhr.open("POST", `${API_URL}/api/studio/projects/${id}/assets`);
@@ -99,6 +108,7 @@ export function uploadAsset(id: string, file: File, onProgress: (fraction: numbe
     };
     const form = new FormData();
     form.append("files", file);
+    form.append("folders", folder);
     xhr.send(form);
   });
   return { promise, abort: () => xhr.abort() };

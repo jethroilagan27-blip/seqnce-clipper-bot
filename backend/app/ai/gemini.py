@@ -16,6 +16,7 @@ from .base import AIError, LabeledImage, T
 log = logging.getLogger(__name__)
 
 _RETRYABLE = {429, 500, 502, 503, 504}
+MAX_OUTPUT_TOKENS = 32768
 
 
 class GeminiProvider:
@@ -42,6 +43,7 @@ class GeminiProvider:
             response_mime_type="application/json",
             response_schema=response_model,
             temperature=0.2,
+            max_output_tokens=MAX_OUTPUT_TOKENS,  # long scripts need a long answer (and "thinking" models spend tokens before it)
         )
 
         last_error = "unknown error"
@@ -74,15 +76,26 @@ class GeminiProvider:
                     continue
                 raise AIError("Could not reach the AI service.") from exc
 
+            finish = getattr(resp.candidates[0], "finish_reason", None) if resp.candidates else None
+            finish_name = str(getattr(finish, "name", finish) or "")
             usage = resp.usage_metadata
             if usage:
                 log.info(
-                    "gemini usage: model=%s images=%d prompt_tokens=%s output_tokens=%s",
+                    "gemini usage: model=%s images=%d prompt_tokens=%s output_tokens=%s finish=%s",
                     self._model,
                     len(images or []),
                     usage.prompt_token_count,
                     usage.candidates_token_count,
+                    finish_name,
                 )
+
+            if finish_name == "MAX_TOKENS":
+                # The answer was cut off: whatever was parsed from it is only the beginning. Never use half an answer.
+                last_error = "the answer was cut off (too long)"
+                log.warning("gemini answer cut off at the output limit (attempt %d)", attempt)
+                if attempt < self._max_retries:
+                    continue
+                raise AIError("The AI's answer was too long and got cut off. Try a shorter request, or send it in parts.")
 
             parsed = resp.parsed
             if isinstance(parsed, response_model):

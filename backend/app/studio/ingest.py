@@ -8,6 +8,7 @@ with ffprobe before it is accepted.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -45,6 +46,16 @@ class Ingested:
     duration: float | None
     has_audio: bool
     size_bytes: int
+
+
+def clean_folder(raw: str | None) -> str:
+    """The folder a file came from ("Members/Vidal"), as a plain label: no dots, no control characters, short."""
+    parts = []
+    for part in (raw or "").replace("\\", "/").split("/"):
+        part = re.sub(r"[\x00-\x1f\x7f]", "", part).strip()
+        if part and part not in (".", ".."):
+            parts.append(part[:60])
+    return "/".join(parts[:8])[:200]
 
 
 def kind_of(name: str) -> str | None:

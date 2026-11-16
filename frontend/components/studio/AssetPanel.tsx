@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
+import { baseName, folderOf, fromFileList, mergePicked, naturalCompare, safeFromDataTransfer, splitByExtension, type Picked } from "@/lib/pickFiles";
 import { assetFileUrl, deleteAsset, formatMegabytes, formatSeconds, thumbUrl, uploadAsset, type Asset, type AssetKind, type Project } from "@/lib/studio";
 import { ConfirmButton } from "./ui";
 
@@ -28,20 +29,24 @@ let uploadKey = 0;
 
 export default function AssetPanel({ project, accepts, disabled, onProject, onDeleted }: Props) {
   const input = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const busy = uploads.some((u) => !u.error && u.fraction < 1);
   const { limits, usage } = project;
 
-  async function send(files: File[]) {
+  /** Files or whole folders: each file keeps the folder it came from (the assistant reads the folder names too). */
+  async function send(chosen: Picked[]) {
     setNotice(null);
     const problems: string[] = [];
-    for (const file of files) {
+    const { accepted, skipped } = splitByExtension(mergePicked([], chosen), accepts);
+    if (skipped.length) problems.push(`Left out (not a supported file): ${skipped.slice(0, 5).map((s) => baseName(s.path)).join(", ")}${skipped.length > 5 ? ` and ${skipped.length - 5} more` : ""}`);
+    for (const { file, path } of accepted) {
       const key = (uploadKey += 1);
-      setUploads((list) => [...list, { key, name: file.name, fraction: 0 }]);
+      setUploads((list) => [...list, { key, name: path, fraction: 0 }]);
       try {
-        const result = await uploadAsset(project.id, file, (f) => setUploads((list) => list.map((u) => (u.key === key ? { ...u, fraction: f } : u)))).promise;
+        const result = await uploadAsset(project.id, file, folderOf(path), (f) => setUploads((list) => list.map((u) => (u.key === key ? { ...u, fraction: f } : u)))).promise;
         onProject(result.project);
         result.rejected.forEach((r) => problems.push(`${r.name}: ${r.reason}`));
         setUploads((list) => list.filter((u) => u.key !== key));
@@ -64,7 +69,8 @@ export default function AssetPanel({ project, accepts, disabled, onProject, onDe
         <img src={thumbUrl(project.id, a.id)} alt="" className="h-10 w-14 shrink-0 rounded object-cover" />
       )}
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm" title={a.name ?? ""}>
+        <p className="truncate text-sm" title={a.folder ? `${a.folder}/${a.name}` : (a.name ?? "")}>
+          {a.folder && <span className="text-white/40">{a.folder}/</span>}
           {a.name}
         </p>
         <p className="text-xs text-white/40">
@@ -91,14 +97,22 @@ export default function AssetPanel({ project, accepts, disabled, onProject, onDe
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          if (!disabled) void send(Array.from(e.dataTransfer.files));
+          if (!disabled)
+            void safeFromDataTransfer(e.dataTransfer).then((items) => {
+              if (items.length) void send(items);
+            });
         }}
         className={`rounded-xl border-2 border-dashed p-4 text-center text-sm ${dragging ? "border-violet-400 bg-violet-500/10" : "border-white/15"}`}
       >
-        <p className="text-white/70">Drop your clips, audio and pictures here</p>
-        <button disabled={disabled || busy} onClick={() => input.current?.click()} className="mt-2 rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-semibold hover:bg-violet-500 disabled:bg-white/10 disabled:text-white/30">
-          Choose files
-        </button>
+        <p className="text-white/70">Drop your clips, audio and pictures, or whole folders, here</p>
+        <div className="mt-2 flex flex-wrap justify-center gap-2">
+          <button disabled={disabled || busy} onClick={() => input.current?.click()} className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-semibold hover:bg-violet-500 disabled:bg-white/10 disabled:text-white/30">
+            Choose files
+          </button>
+          <button disabled={disabled || busy} onClick={() => folderInput.current?.click()} className="rounded-lg border border-white/20 px-4 py-1.5 text-sm hover:bg-white/5 disabled:opacity-40">
+            Choose a folder
+          </button>
+        </div>
         <input
           ref={input}
           type="file"
@@ -106,9 +120,20 @@ export default function AssetPanel({ project, accepts, disabled, onProject, onDe
           hidden
           accept={accepts.join(",")}
           onChange={(e) => {
-            const files = Array.from(e.target.files ?? []);
+            const items = fromFileList(e.target.files ?? []);
             e.target.value = "";
-            if (files.length) void send(files);
+            if (items.length) void send(items);
+          }}
+        />
+        <input
+          ref={folderInput}
+          type="file"
+          hidden
+          {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+          onChange={(e) => {
+            const items = fromFileList(e.target.files ?? []);
+            e.target.value = "";
+            if (items.length) void send(items);
           }}
         />
         <p className="mt-2 text-xs text-white/40">
@@ -142,7 +167,9 @@ export default function AssetPanel({ project, accepts, disabled, onProject, onDe
       )}
 
       {GROUPS.map((g) => {
-        const items = project.assets.filter((a) => a.kind === g.kind);
+        const items = project.assets
+          .filter((a) => a.kind === g.kind)
+          .sort((a, b) => naturalCompare(a.folder ?? "", b.folder ?? "") || naturalCompare(a.name ?? "", b.name ?? "")); // folder by folder, like the user's own folders
         if (g.kind === "font" && !limits.custom_fonts && items.length === 0) return null; // the plan has no custom fonts: don't mention them
         return (
           <div key={g.kind}>

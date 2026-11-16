@@ -98,6 +98,8 @@ export type Asset = {
   size_bytes: number;
   /** Fonts only: the name a text asks for to use this font. */
   family?: string | null;
+  /** The folder it came from ("Members/Vidal"), or "". */
+  folder?: string;
 };
 
 let counter = 0;

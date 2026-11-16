@@ -35,6 +35,7 @@ FEATURES: dict[str, tuple[type, str]] = {
     "studio_ducking": (bool, "Music that lowers by itself while someone speaks"),
     "studio_auto_montage": (bool, "Spread clips or pictures evenly under a voice-over"),
     "studio_custom_fonts": (bool, "Upload your own font files for titles"),
+    "studio_ai_chat": (bool, "The AI assistant that builds and changes scenes from a script (uses the daily chat limit)"),
 }
 
 PLAN_NAMES = ("standard", "pro", "max")
@@ -58,6 +59,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "studio_ducking": False,
         "studio_auto_montage": False,
         "studio_custom_fonts": False,
+        "studio_ai_chat": False,
     },
     "pro": {
         "studio": True,
@@ -77,6 +79,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "studio_ducking": True,
         "studio_auto_montage": True,
         "studio_custom_fonts": True,
+        "studio_ai_chat": True,
     },
     "max": {
         "studio": True,
@@ -96,6 +99,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "studio_ducking": True,
         "studio_auto_montage": True,
         "studio_custom_fonts": True,
+        "studio_ai_chat": True,
     },
 }
 DEFAULT_PLAN = "standard"

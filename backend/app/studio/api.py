@@ -12,14 +12,14 @@ import uuid
 from pathlib import Path as FsPath
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import auth, uploadguard
 from ..auth import User, can_access, current_user, ensure_quota, media_user, spend_quota
 from ..config import get_settings
-from . import engine, ingest, store
+from . import chat, engine, ingest, store
 from .schemas import (
     AUDIO_SUFFIXES,
     FONT_SUFFIXES,
@@ -66,7 +66,8 @@ def _editable(project: dict[str, Any]) -> None:
 def _limits(feats: dict[str, Any]) -> dict[str, Any]:
     keys = ("studio_max_projects", "studio_max_scenes", "studio_max_minutes", "studio_max_height", "studio_max_assets",
             "studio_max_storage_mb", "studio_max_file_mb", "studio_renders_per_day", "studio_crossfade", "studio_text_effects",
-            "studio_overlays", "studio_grid", "studio_credits", "studio_ducking", "studio_auto_montage", "studio_custom_fonts")
+            "studio_overlays", "studio_grid", "studio_credits", "studio_ducking", "studio_auto_montage", "studio_custom_fonts",
+            "studio_ai_chat")
     return {k.removeprefix("studio_"): feats[k] for k in keys} | {"max_visuals_per_scene": MAX_VISUALS_PER_SCENE}
 
 
@@ -96,7 +97,7 @@ def _out(project: dict[str, Any], feats: dict[str, Any]) -> dict[str, Any]:
         "render": {"kind": project.get("render_kind"), "scene": project.get("render_scene")},
         "doc": doc.model_dump(),  # filled in with defaults, so projects saved before a tool existed still open
         "assets": [
-            {"id": a["id"], "kind": a["kind"], "name": a["original_name"], "width": a["width"], "height": a["height"],
+            {"id": a["id"], "kind": a["kind"], "name": a["original_name"], "folder": a["folder"], "width": a["width"], "height": a["height"],
              "duration": a["duration"], "has_audio": bool(a["has_audio"]), "size_bytes": a["size_bytes"],
              "family": _family(pid, a) if a["kind"] == "font" else None}
             for a in asset_rows
@@ -190,7 +191,10 @@ def put_doc(body: StudioDoc, project_id: str = PROJECT_ID, user: User = Depends(
 
 @router.post("/projects/{project_id}/assets")
 def upload_assets(
-    project_id: str = PROJECT_ID, files: list[UploadFile] = File(...), user: User = Depends(current_user)
+    project_id: str = PROJECT_ID,
+    files: list[UploadFile] = File(...),
+    folders: list[str] = Form(default=[]),  # the folder each file came from (same order as files); a label for you and the AI
+    user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Add clips, audio files and pictures (one or a few per request; the page sends them one at a time)."""
     feats = _feats(user)
@@ -201,8 +205,9 @@ def upload_assets(
     added: list[dict[str, Any]] = []
     rejected: list[dict[str, str]] = []
     count, used = store.asset_totals(project_id)
-    for f in files:
+    for index, f in enumerate(files):
         name = (f.filename or "file").replace("\\", "/").rsplit("/", 1)[-1][:120]
+        folder = ingest.clean_folder(folders[index] if index < len(folders) else "")
         if count >= feats["studio_max_assets"]:
             rejected.append({"name": name, "reason": f"A project holds at most {feats['studio_max_assets']} files."})
             continue
@@ -220,10 +225,10 @@ def upload_assets(
             rejected.append({"name": name, "reason": str(exc)})
             continue
         store.add_asset(project_id, asset_id, got.kind, name, got.file, width=got.width, height=got.height,
-                        duration=got.duration, has_audio=got.has_audio, size_bytes=got.size_bytes)
+                        duration=got.duration, has_audio=got.has_audio, size_bytes=got.size_bytes, folder=folder)
         count += 1
         used += got.size_bytes
-        added.append({"id": asset_id, "kind": got.kind, "name": name})
+        added.append({"id": asset_id, "kind": got.kind, "name": name, "folder": folder})
     return {"added": added, "rejected": rejected, "project": _out(store.get(project_id) or {}, feats)}
 
 
@@ -261,6 +266,71 @@ def asset_file(project_id: str = PROJECT_ID, asset_id: str = ASSET_ID, user: Use
     if path is None or not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(path, headers=_PRIVATE)
+
+
+# ---- the AI assistant -------------------------------------------------------------
+
+class ChatBody(BaseModel):
+    message: str = Field(min_length=1, max_length=chat.MAX_MESSAGE_CHARS)
+
+
+def _chat_out(project_id: str, feats: dict[str, Any], project: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "messages": store.chat_history(project_id),
+        "can_undo": store.get_backup(project_id) is not None,
+        "project": _out(project or store.get(project_id) or {}, feats),
+    }
+
+
+@router.get("/projects/{project_id}/chat")
+def get_chat(project_id: str = PROJECT_ID, user: User = Depends(current_user)) -> dict[str, Any]:
+    feats = auth.require_feature(user, "studio_ai_chat", "The AI assistant isn't included in your plan. Ask the Seqnce team to switch it on.")
+    _project_or_404(project_id, user)
+    return _chat_out(project_id, feats)
+
+
+@router.post("/projects/{project_id}/chat")
+def post_chat(body: ChatBody, project_id: str = PROJECT_ID, user: User = Depends(current_user)) -> dict[str, Any]:
+    """Give the assistant a script or an instruction. It rebuilds the scenes (the old version is kept so it can be undone)."""
+    feats = auth.require_feature(user, "studio_ai_chat", "The AI assistant isn't included in your plan. Ask the Seqnce team to switch it on.")
+    project = _project_or_404(project_id, user)
+    _editable(project)
+    ensure_quota(user, "chat")  # the AI is free-tier: it shares the daily chat limit with the video chat
+    doc = StudioDoc.model_validate(project["doc_json"])
+    fonts = engine.font_families() + [
+        f for f in (_family(project_id, a) for a in store.assets(project_id) if a["kind"] == "font") if f
+    ]
+    try:
+        outcome = chat.run_turn(body.message, doc, store.assets(project_id), feats, fonts, store.chat_history(project_id))
+    except chat.ChatUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except chat.ChatFailed as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    spend_quota(user, "chat")  # only a message that got an answer is counted
+    reply = outcome.message + ("\n\n" + "\n".join(f"• {n}" for n in outcome.notes) if outcome.notes else "")
+    store.add_chat(project_id, "user", body.message[:3000] + ("…" if len(body.message) > 3000 else ""))
+    store.add_chat(project_id, "assistant", reply)
+    if outcome.new_doc is not None:
+        store.set_backup(project_id, doc.model_dump())
+        store.update(project_id, doc_json=outcome.new_doc.model_dump())
+    return _chat_out(project_id, feats)
+
+
+@router.post("/projects/{project_id}/chat/undo")
+def undo_chat(project_id: str = PROJECT_ID, user: User = Depends(current_user)) -> dict[str, Any]:
+    """Put the scenes back the way they were before the assistant's last change."""
+    feats = auth.require_feature(user, "studio_ai_chat", "The AI assistant isn't included in your plan. Ask the Seqnce team to switch it on.")
+    project = _project_or_404(project_id, user)
+    _editable(project)
+    backup = store.get_backup(project_id)
+    if backup is None:
+        raise HTTPException(status_code=409, detail="There is nothing to undo.")
+    doc = StudioDoc.model_validate(backup)
+    gone = doc.asset_ids() - {a["id"] for a in store.assets(project_id)}
+    store.update(project_id, doc_json=(doc.without_assets(gone) if gone else doc).model_dump())
+    store.set_backup(project_id, None)
+    store.add_chat(project_id, "assistant", "Undone: the scenes are back the way they were before my last change.")
+    return _chat_out(project_id, feats)
 
 
 # ---- making the video -----------------------------------------------------------

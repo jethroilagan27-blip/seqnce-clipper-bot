@@ -14,6 +14,7 @@ import {
   duplicateScene,
   emptyScene,
   formatSeconds,
+  getChat,
   getInfo,
   gridScene,
   getProject,
@@ -21,10 +22,14 @@ import {
   moveItem,
   previewUrl,
   saveDoc,
+  sendChat,
   startRender,
   textCardScene,
+  undoChat,
   videoUrl,
   withoutAsset,
+  type ChatMessage,
+  type ChatState,
   type Project,
   type ProjectSummary,
   type Scene,
@@ -33,6 +38,7 @@ import {
   type StudioInfo,
 } from "@/lib/studio";
 import AssetPanel from "./AssetPanel";
+import ChatPanel from "./ChatPanel";
 import SceneEditor from "./SceneEditor";
 import { ConfirmButton, NumberInput, buttonCls, inputCls, primaryCls } from "./ui";
 
@@ -67,6 +73,10 @@ export default function StudioApp({ account }: { account: AccountInfo }) {
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [error, setError] = useState<string | null>(null);
   const [openScene, setOpenScene] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [thinking, setThinking] = useState(false); // the assistant is working: nothing else may change the scenes meanwhile
+  const [chatError, setChatError] = useState<string | null>(null);
 
   // the saving machinery (only touched in event handlers, never while rendering)
   const latest = useRef<{ id: string; doc: StudioDoc } | null>(null);
@@ -111,6 +121,15 @@ export default function StudioApp({ account }: { account: AccountInfo }) {
         setDoc(p.doc);
         setSaveState("saved");
         setOpenScene(p.doc.scenes[0]?.id ?? null);
+        if (p.limits.ai_chat) {
+          getChat(p.id)
+            .then((s) => {
+              if (cancelled) return;
+              setChatMessages(s.messages);
+              setCanUndo(s.can_undo);
+            })
+            .catch(() => {});
+        }
       })
       .catch((e) => {
         if (cancelled) return;
@@ -187,6 +206,9 @@ export default function StudioApp({ account }: { account: AccountInfo }) {
     setProject(null);
     setDoc(null);
     setError(null);
+    setChatMessages([]);
+    setCanUndo(false);
+    setChatError(null);
     writeStored(id);
     setProjectId(id);
   }
@@ -198,6 +220,46 @@ export default function StudioApp({ account }: { account: AccountInfo }) {
       await chooseProject(id);
     } catch (e) {
       setError(messageOf(e, "Could not create the project."));
+    }
+  }
+
+  /** Take what the server now has (the assistant changed the scenes, or its change was undone). */
+  function adopt(s: ChatState) {
+    latest.current = { id: s.project.id, doc: s.project.doc };
+    setDoc(s.project.doc);
+    setProject(s.project);
+    setChatMessages(s.messages);
+    setCanUndo(s.can_undo);
+    setSaveState("saved");
+    setOpenScene((open) => (s.project.doc.scenes.some((x) => x.id === open) ? open : (s.project.doc.scenes[0]?.id ?? null)));
+  }
+
+  async function askAssistant(text: string) {
+    if (!project) return;
+    setChatError(null);
+    setThinking(true);
+    try {
+      await flush(); // the assistant starts from what is saved
+      adopt(await sendChat(project.id, text));
+      account.refresh(); // it counts against the daily chat limit
+    } catch (e) {
+      setChatError(messageOf(e, "The assistant could not answer."));
+    } finally {
+      setThinking(false);
+    }
+  }
+
+  async function undoAssistant() {
+    if (!project) return;
+    setChatError(null);
+    setThinking(true);
+    try {
+      await flush();
+      adopt(await undoChat(project.id));
+    } catch (e) {
+      setChatError(messageOf(e, "Could not undo."));
+    } finally {
+      setThinking(false);
     }
   }
 
@@ -242,7 +304,7 @@ export default function StudioApp({ account }: { account: AccountInfo }) {
       </Shell>
     );
 
-  const busy = active;
+  const busy = active || thinking; // nothing may change while a video is made or the assistant is writing the scenes
   const limits = project?.limits ?? info.limits;
 
   return (
@@ -307,6 +369,9 @@ export default function StudioApp({ account }: { account: AccountInfo }) {
 
           <div className="min-w-0 space-y-6">
             <ProjectSettings project={project} doc={doc} disabled={busy} onChange={edit} />
+            {project.limits.ai_chat && (
+              <ChatPanel messages={chatMessages} canUndo={canUndo} thinking={thinking} locked={active} error={chatError} onSend={(t) => void askAssistant(t)} onUndo={() => void undoAssistant()} />
+            )}
             <Scenes
               project={project}
               doc={doc}
@@ -317,7 +382,7 @@ export default function StudioApp({ account }: { account: AccountInfo }) {
               onChange={edit}
               onPreview={(id) => void render("preview", id)}
             />
-            <RenderPanel project={project} busy={busy} onRender={(kind) => void render(kind, null)} />
+            <RenderPanel project={project} busy={active} onRender={(kind) => void render(kind, null)} />
           </div>
         </div>
       )}

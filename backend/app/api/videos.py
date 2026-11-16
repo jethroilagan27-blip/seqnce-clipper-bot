@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from .. import db, stages, uploadguard
 from ..auth import User, current_user, ensure_no_other_active_job, ensure_quota, media_user, spend_quota
 from ..config import get_settings
+from ..pipeline import prepare
 from ..plan.text import clean_instructions
 from ..schemas import EditSettings, UploadResponse
 from ..services import media
@@ -25,7 +26,20 @@ router = APIRouter(prefix="/api/videos", tags=["videos"])
 
 CHUNK = 1024 * 1024
 uploadguard.register(r"^/api/videos/upload$", lambda: get_settings().max_upload_bytes + CHUNK)
-ALLOWED_SUFFIXES = {".mp4"}
+ALLOWED_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".webm"}
+_QUICKTIME_ATOMS = {b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip", b"pnot"}  # what the first box of an MP4 / MOV can be
+_EBML = b"\x1a\x45\xdf\xa3"  # MKV / WebM
+
+
+def _looks_like_video(suffix: str, head: bytes) -> bool:
+    """A quick look at the first bytes, so a renamed text file is refused before it is stored. ffprobe has the final say."""
+    if suffix in (".mkv", ".webm"):
+        return head[:4] == _EBML
+    return head[4:8] in _QUICKTIME_ATOMS  # .mp4, .m4v and .mov (older QuickTime files start with moov / mdat)
+
+
+def _media_type(path: FsPath) -> str:
+    return {".mov": "video/quicktime", ".mkv": "video/x-matroska", ".webm": "video/webm"}.get(path.suffix.lower(), "video/mp4")
 
 THUMB_HEIGHTS = (48, 64, 96, 144)  # the only sizes the filmstrip asks for
 _thumb_slots = threading.BoundedSemaphore(3)  # never let a filmstrip hog the CPU while a render runs
@@ -73,15 +87,16 @@ def upload_video(
         raise HTTPException(status_code=422, detail="Invalid editing settings") from exc
 
     display_name = _display_name(file.filename)
-    if FsPath(display_name).suffix.lower() not in ALLOWED_SUFFIXES:
-        raise HTTPException(status_code=415, detail="Only .mp4 files are supported right now.")
+    suffix = FsPath(display_name).suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(status_code=415, detail="Use a video file: MP4, MOV, M4V, MKV or WebM.")
 
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > cfg.max_upload_bytes + CHUNK:
         raise _too_large(cfg.max_upload_mb)
 
     job_id = uuid.uuid4().hex
-    dest = cfg.uploads_dir / f"{job_id}.mp4"  # server-generated name: no traversal possible
+    dest = cfg.uploads_dir / f"{job_id}{suffix}"  # server-generated name (the extension comes from our own list): no traversal possible
 
     written = 0
     try:
@@ -89,8 +104,8 @@ def upload_video(
             first = True
             while chunk := file.file.read(CHUNK):
                 if first:
-                    if chunk[4:8] != b"ftyp":
-                        raise HTTPException(status_code=415, detail="This doesn't look like an MP4 file.")
+                    if not _looks_like_video(suffix, chunk[:16]):
+                        raise HTTPException(status_code=415, detail=f"This doesn't look like a {suffix[1:].upper()} video file.")
                     first = False
                 written += len(chunk)
                 if written > cfg.max_upload_bytes:
@@ -172,7 +187,10 @@ def original_video(job_id: str = JOB_ID, user: User = Depends(media_user)) -> Fi
     path = FsPath(job["upload_path"])
     if not path.is_file():
         raise HTTPException(status_code=404, detail="The original video file is missing")
-    return FileResponse(path, media_type="video/mp4")
+    web = prepare.web_copy_path(job_id)  # a browser-friendly copy, made for phone formats a browser may not play (HEVC, MOV)
+    if web.is_file():
+        return FileResponse(web, media_type="video/mp4")
+    return FileResponse(path, media_type=_media_type(path))
 
 
 @router.get("/{job_id}/thumb")

@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS studio_assets (
     kind          TEXT NOT NULL,                       -- video | audio | image
     position      INTEGER NOT NULL,
     original_name TEXT,
+    folder        TEXT NOT NULL DEFAULT '',            -- the folder it came from ("Members/Vidal"); a label only, never a path
     file          TEXT NOT NULL,                       -- server-made file name inside the project's assets/ folder
     width         INTEGER,
     height        INTEGER,
@@ -44,6 +45,14 @@ CREATE TABLE IF NOT EXISTS studio_assets (
     size_bytes    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_studio_assets ON studio_assets(project_id, position);
+CREATE TABLE IF NOT EXISTS studio_chat (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  TEXT NOT NULL,
+    role        TEXT NOT NULL,                         -- user | assistant
+    text        TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_studio_chat ON studio_chat(project_id, id);
 """
 
 _JSON = ("doc_json", "output_meta_json")
@@ -57,6 +66,13 @@ def _now() -> str:
 def init_tables() -> None:
     with db.connect() as conn:
         conn.executescript(SCHEMA)
+        # tiny migrations for databases made before a column existed
+        assets_cols = {r["name"] for r in conn.execute("PRAGMA table_info(studio_assets)")}
+        if "folder" not in assets_cols:
+            conn.execute("ALTER TABLE studio_assets ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
+        project_cols = {r["name"] for r in conn.execute("PRAGMA table_info(studio_projects)")}
+        if "doc_backup_json" not in project_cols:
+            conn.execute("ALTER TABLE studio_projects ADD COLUMN doc_backup_json TEXT")  # the document before the AI's last change
 
 
 def project_dir(project_id: str) -> Path:
@@ -138,14 +154,38 @@ def get_asset(project_id: str, asset_id: str) -> dict[str, Any] | None:
 
 
 def add_asset(project_id: str, asset_id: str, kind: str, name: str, file: str, *, width: int | None, height: int | None,
-              duration: float | None, has_audio: bool, size_bytes: int) -> None:
+              duration: float | None, has_audio: bool, size_bytes: int, folder: str = "") -> None:
     with db.connect() as conn:
         pos = conn.execute("SELECT COALESCE(MAX(position), -1) + 1 AS p FROM studio_assets WHERE project_id = ?", (project_id,)).fetchone()["p"]
         conn.execute(
-            "INSERT INTO studio_assets (id, project_id, kind, position, original_name, file, width, height, duration, has_audio, size_bytes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (asset_id, project_id, kind, pos, name, file, width, height, duration, int(has_audio), size_bytes),
+            "INSERT INTO studio_assets (id, project_id, kind, position, original_name, folder, file, width, height, duration, has_audio, size_bytes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (asset_id, project_id, kind, pos, name, folder, file, width, height, duration, int(has_audio), size_bytes),
         )
+
+
+# ---- the AI chat ------------------------------------------------------------------
+
+def add_chat(project_id: str, role: str, text: str) -> None:
+    with db.connect() as conn:
+        conn.execute("INSERT INTO studio_chat (project_id, role, text, created_at) VALUES (?, ?, ?, ?)", (project_id, role, text, _now()))
+
+
+def chat_history(project_id: str, limit: int = 60) -> list[dict[str, Any]]:
+    with db.connect() as conn:
+        rows = conn.execute("SELECT role, text, created_at FROM studio_chat WHERE project_id = ? ORDER BY id DESC LIMIT ?", (project_id, limit)).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
+def set_backup(project_id: str, doc: dict[str, Any] | None) -> None:
+    with db.connect() as conn:
+        conn.execute("UPDATE studio_projects SET doc_backup_json = ? WHERE id = ?", (json.dumps(doc) if doc is not None else None, project_id))
+
+
+def get_backup(project_id: str) -> dict[str, Any] | None:
+    with db.connect() as conn:
+        row = conn.execute("SELECT doc_backup_json FROM studio_projects WHERE id = ?", (project_id,)).fetchone()
+    return json.loads(row["doc_backup_json"]) if row and row["doc_backup_json"] else None
 
 
 def asset_totals(project_id: str) -> tuple[int, int]:
@@ -188,6 +228,7 @@ def requeue_interrupted() -> int:
 def delete(project_id: str) -> None:
     with db.connect() as conn:
         conn.execute("DELETE FROM studio_assets WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM studio_chat WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM studio_projects WHERE id = ?", (project_id,))
     shutil.rmtree(project_dir(project_id), ignore_errors=True)
 

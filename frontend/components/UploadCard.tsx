@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MAX_INSTRUCTIONS, MAX_UPLOAD_MB, formatBytes, getMusic, type EditSettings } from "@/lib/api";
+import { VIDEO_EXTENSIONS, baseName, folderOf, fromFileList, mergePicked, safeFromDataTransfer, splitByExtension, type Picked } from "@/lib/pickFiles";
 
 type Props = {
   busy: boolean;
@@ -9,14 +10,19 @@ type Props = {
   error: string | null;
   /** Set when the user's daily limit is used up; the upload button is disabled and this is shown. */
   blockedReason?: string | null;
+  /** One video: the normal flow. */
   onStart: (file: File, settings: EditSettings) => void;
+  /** Several videos (or a folder): they are edited one after another with the same settings. */
+  onStartBatch: (items: Picked[], settings: EditSettings) => void;
   onCancel: () => void;
 };
 
-function validate(file: File): string | null {
-  if (!file.name.toLowerCase().endsWith(".mp4")) return "Only .mp4 files are supported right now.";
-  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return `That file is over ${MAX_UPLOAD_MB} MB.`;
-  if (file.size === 0) return "That file is empty.";
+const MAX_BATCH = 100;
+
+/** Why a file can't be used, or null. */
+function problemWith(item: Picked): string | null {
+  if (item.file.size === 0) return "it is empty";
+  if (item.file.size > MAX_UPLOAD_MB * 1024 * 1024) return `it is over ${MAX_UPLOAD_MB} MB`;
   return null;
 }
 
@@ -48,9 +54,10 @@ function Toggle(props: {
   );
 }
 
-export default function UploadCard({ busy, uploadProgress, error, blockedReason, onStart, onCancel }: Props) {
+export default function UploadCard({ busy, uploadProgress, error, blockedReason, onStart, onStartBatch, onCancel }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
+  const [picked, setPicked] = useState<Picked[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [tracks, setTracks] = useState<string[] | null>(null);
@@ -79,11 +86,25 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
     };
   }, [wantsMusic]);
 
-  function pick(f: File | undefined) {
-    if (!f) return;
-    const problem = validate(f);
-    setFileError(problem);
-    setFile(problem ? null : f);
+  /** Add what was chosen (files, or a folder with everything inside it) to the list. Other kinds of file are named, not silently lost. */
+  function add(items: Picked[]) {
+    const { accepted, skipped } = splitByExtension(items, VIDEO_EXTENSIONS);
+    const usable: Picked[] = [];
+    const notes: string[] = [];
+    for (const it of accepted) {
+      const why = problemWith(it);
+      if (why) notes.push(`${baseName(it.path)} (${why})`);
+      else usable.push(it);
+    }
+    skipped.forEach((s) => notes.push(`${baseName(s.path)} (not a video)`));
+    const merged = mergePicked(picked, usable);
+    const over = merged.length > MAX_BATCH;
+    setPicked(over ? merged.slice(0, MAX_BATCH) : merged);
+    const parts: string[] = [];
+    if (over) parts.push(`Only the first ${MAX_BATCH} videos are kept.`);
+    if (notes.length) parts.push(`Left out: ${notes.slice(0, 4).join(", ")}${notes.length > 4 ? ` and ${notes.length - 4} more` : ""}. Use MP4, MOV, M4V, MKV or WebM files.`);
+    if (!usable.length && !notes.length) parts.push("No videos found there.");
+    setFileError(parts.length ? parts.join(" ") : null);
   }
 
   const shownError = fileError ?? error;
@@ -106,35 +127,97 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          if (!busy) pick(e.dataTransfer.files[0]);
+          if (!busy) void safeFromDataTransfer(e.dataTransfer, MAX_BATCH * 4).then(add);
         }}
-        className={`flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-14 text-center transition ${
+        className={`flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition ${
           dragging ? "border-violet-400 bg-violet-500/10" : "border-white/15 bg-white/[0.03]"
         } ${busy ? "cursor-default" : "cursor-pointer hover:border-white/40"}`}
       >
         <input
           ref={inputRef}
           type="file"
-          accept="video/mp4,.mp4"
+          multiple
+          accept="video/*,.mov,.mkv,.m4v,.webm,.mp4"
           className="hidden"
-          onChange={(e) => pick(e.target.files?.[0])}
+          onChange={(e) => {
+            add(fromFileList(e.target.files ?? []));
+            e.target.value = "";
+          }}
         />
-        {file ? (
-          <>
-            <p className="text-lg font-medium break-all">{file.name}</p>
-            <p className="text-sm text-white/50">{formatBytes(file.size)}</p>
-            {!busy && <p className="text-xs text-white/40">Click or drop to replace</p>}
-          </>
-        ) : (
-          <>
-            <p className="text-lg font-medium">Drag &amp; drop your video here</p>
-            <p className="text-sm text-white/50">or click to browse</p>
-            <p className="mt-2 text-xs text-white/40">
-              MP4 only · up to {MAX_UPLOAD_MB} MB · best with talking-head footage
-            </p>
-          </>
-        )}
+        <input
+          ref={folderRef}
+          type="file"
+          className="hidden"
+          {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+          onChange={(e) => {
+            add(fromFileList(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
+        <p className="text-lg font-medium">Drag &amp; drop your videos or a whole folder here</p>
+        <div className="mt-1 flex flex-wrap justify-center gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              inputRef.current?.click();
+            }}
+            className="rounded-lg border border-white/20 px-4 py-1.5 text-sm hover:bg-white/5 disabled:opacity-40"
+          >
+            Choose videos
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              folderRef.current?.click();
+            }}
+            className="rounded-lg border border-white/20 px-4 py-1.5 text-sm hover:bg-white/5 disabled:opacity-40"
+          >
+            Choose a folder
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-white/40">
+          MP4, MOV, M4V, MKV or WebM · up to {MAX_UPLOAD_MB} MB each · many at once are edited one after another
+        </p>
       </div>
+
+      {picked.length > 0 && (
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <p className="text-sm font-medium">
+              {picked.length} video{picked.length === 1 ? "" : "s"} ready
+              <span className="ml-2 text-xs font-normal text-white/40">{formatBytes(picked.reduce((n, p) => n + p.file.size, 0))}</span>
+            </p>
+            {!busy && (
+              <button onClick={() => setPicked([])} className="text-xs text-white/50 underline hover:text-white">
+                Clear
+              </button>
+            )}
+          </div>
+          <ul className="max-h-48 space-y-1 overflow-y-auto text-sm" aria-label="Videos to edit">
+            {picked.map((p) => {
+              const folder = folderOf(p.path);
+              return (
+                <li key={`${p.path}:${p.file.size}`} className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate" title={p.path}>
+                    {folder && <span className="text-white/40">{folder}/</span>}
+                    {baseName(p.path)}
+                  </span>
+                  <span className="shrink-0 text-xs text-white/40">{formatBytes(p.file.size)}</span>
+                  {!busy && (
+                    <button onClick={() => setPicked(picked.filter((x) => x !== p))} aria-label={`Remove ${baseName(p.path)}`} className="shrink-0 text-xs text-white/40 hover:text-white">
+                      ✕
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <div className="space-y-3">
         <div className="rounded-lg border border-white/10 px-4 py-3">
@@ -258,11 +341,11 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
         </div>
       ) : (
         <button
-          disabled={!file || busy || !!blockedReason}
-          onClick={() => file && onStart(file, settings)}
+          disabled={picked.length === 0 || busy || !!blockedReason}
+          onClick={() => (picked.length === 1 ? onStart(picked[0].file, settings) : onStartBatch(picked, settings))}
           className="w-full rounded-xl bg-violet-600 px-6 py-3.5 font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/30"
         >
-          Start editing
+          {picked.length > 1 ? `Edit these ${picked.length} videos, one after another` : "Start editing"}
         </button>
       )}
     </div>

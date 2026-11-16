@@ -163,6 +163,9 @@ Issues and pull requests are welcome. Please run the tests above before opening 
 
 [MIT](LICENSE) © 2026 Jethro Ilagan. FFmpeg, faster-whisper and the other dependencies have their own licenses; FFmpeg is installed separately and is not distributed with this repository.
 
+## Many videos, folders and phone formats (video mode)
+"Edit with video" takes MP4, MOV, M4V, MKV and WebM. You can pick many videos or a whole folder at once: they are edited one after another with the same settings (the server edits one video per person at a time and counts each against the daily limit; if the limit runs out the rest are not sent, and a broken file doesn't stop the others). iPhone/HEVC and MOV footage is edited as it is; for the in-browser preview Seqnce also makes a 720p H.264 copy in the background.
+
 ## Studio (heavy, scripted edits)
 Studio builds long videos from a script: many scenes, each with the user's own clips, pictures, voice-over, music and text, with fades and cross-fades, titles in your own font, pictures and highlights over a scene, map pins, a grid of several clips at once, rolling credits, and music that lowers while someone speaks. It is switched on per account (plans and single features: see [docs/STUDIO.md](docs/STUDIO.md)); new accounts do not have it.
 

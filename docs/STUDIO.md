@@ -25,11 +25,20 @@ It lives at `/studio` (a third tab next to "Edit with video" and "Edit with phot
 
 Previews: "Preview this scene" and "Quick preview of everything" make small, rough versions quickly and cost nothing. "Make the finished video" renders at the account's quality (720p or 1080p) and counts against the daily limit.
 
+## Sending folders, and the assistant that reads the names
+
+- **Folders:** "Choose a folder" (or drag a whole folder onto the file panel) uploads everything inside it, sub-folders too. Each file keeps the name of the folder it came from ("Members/Vidal"), shown in the file list. Files the computer makes by itself (`.DS_Store`, `Thumbs.db`) are ignored; other kinds of file are named as "left out".
+- **Ask the assistant** (needs the `studio_ai_chat` feature): paste your script, or tell it what to change. The AI is shown every file as `id | kind | folder/file name | length`, the current scenes and your message, and returns the complete list of scenes. It matches the script to your files by reading the **folder and file names** (a folder called "Vidal", a file called "VO 3", "poster", "usa flag"). Then you can talk to it: "make scene 4 longer", "use the flag in the Origin scene".
+- **What the AI can and cannot do:** it only returns data (scenes in a small fixed format). Python checks everything before it touches the project: every file id must exist and be the right kind of file, numbers are clamped, fonts must exist, tools your plan doesn't include are left out, scenes with nothing in them are dropped. Everything it dropped or could not do is listed under its answer. It cannot run code or reach files. Your pasted script is treated as material, not as rules.
+- **Undo:** the scenes before the assistant's last change are kept; "Undo the assistant's last change" puts them back.
+- **Cost:** each message uses one of the account's daily chat messages (the same counter as the video chat; the default is 20 a day). A failed answer costs nothing. It needs `GEMINI_API_KEY` on the server.
+- **It is not perfect:** a free-tier model can mistake one file for another or build a scene differently than it describes. Check the scenes it made (each shows its length, or "needs attention"), and correct it in the chat or by hand.
+
 ## Per-account features and plans
 
 Every account has a **plan** (`standard`, `pro`, `max`) plus **overrides** for single features. What each plan contains is in one place: `backend/app/features.py`. **The numbers there are starting values; the pricing and what each plan includes are still to be decided.**
 
-Features (all switched on / limited per account): `studio`, `studio_max_projects`, `studio_max_scenes`, `studio_max_minutes`, `studio_max_height`, `studio_max_assets`, `studio_max_storage_mb`, `studio_max_file_mb`, `studio_renders_per_day`, `studio_crossfade`, `studio_text_effects`, `studio_overlays`, `studio_grid`, `studio_credits`, `studio_ducking`, `studio_auto_montage`, `studio_custom_fonts`.
+Features (all switched on / limited per account): `studio`, `studio_max_projects`, `studio_max_scenes`, `studio_max_minutes`, `studio_max_height`, `studio_max_assets`, `studio_max_storage_mb`, `studio_max_file_mb`, `studio_renders_per_day`, `studio_crossfade`, `studio_text_effects`, `studio_overlays`, `studio_grid`, `studio_credits`, `studio_ducking`, `studio_auto_montage`, `studio_custom_fonts`, `studio_ai_chat`.
 
 New accounts (including open sign-ups) are on **standard**, which has Studio **off**. Admins and local use (accounts off) get everything.
 
@@ -56,7 +65,7 @@ The server checks these on every request (the website only hides or locks things
 
 ## API
 
-All under `/api/studio` and needing the `studio` feature: `GET /info`, `GET|POST /projects`, `GET|DELETE /projects/{id}`, `PUT /projects/{id}/doc` (the whole scene document), `POST /projects/{id}/assets` (one or a few files), `DELETE /projects/{id}/assets/{asset}`, `POST /projects/{id}/render` (`{"kind": "final" | "preview", "scene_id": null | "..."}`), and the files the page loads itself: `.../assets/{asset}/thumb|file`, `.../preview?scene=`, `.../video`, `.../download`. The document's shape is `backend/app/studio/schemas.py`.
+All under `/api/studio` and needing the `studio` feature (the chat routes also need `studio_ai_chat`): `GET|POST /projects/{id}/chat` (the message history / send a message) and `POST /projects/{id}/chat/undo`; `GET /info`, `GET|POST /projects`, `GET|DELETE /projects/{id}`, `PUT /projects/{id}/doc` (the whole scene document), `POST /projects/{id}/assets` (one or a few files), `DELETE /projects/{id}/assets/{asset}`, `POST /projects/{id}/render` (`{"kind": "final" | "preview", "scene_id": null | "..."}`), and the files the page loads itself: `.../assets/{asset}/thumb|file`, `.../preview?scene=`, `.../video`, `.../download`. The document's shape is `backend/app/studio/schemas.py`.
 
 ## Removing Studio
 

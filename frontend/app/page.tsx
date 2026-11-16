@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import AuthGate, { type AccountInfo } from "@/components/AuthGate";
+import BatchView from "@/components/BatchView";
 import ProcessingView from "@/components/ProcessingView";
 import ResultView from "@/components/ResultView";
 import Shell, { quotaBlock } from "@/components/Shell";
@@ -20,8 +21,38 @@ import {
   type RevisionBody,
   type Versions,
 } from "@/lib/api";
+import { createBatch, type Batch, type BatchRow } from "@/lib/batch";
+import type { Picked } from "@/lib/pickFiles";
 
 const POLL_MS = 1500;
+const BATCH_KEY = "seqnce:batch";
+
+function saveBatch(rows: BatchRow[] | null) {
+  try {
+    if (rows) localStorage.setItem(BATCH_KEY, JSON.stringify(rows));
+    else localStorage.removeItem(BATCH_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** After a page reload the queue itself is gone (the files were in the page), but the videos already sent keep being edited. */
+function restoreBatch(): BatchRow[] | null {
+  try {
+    const raw = localStorage.getItem(BATCH_KEY);
+    const rows = raw ? (JSON.parse(raw) as BatchRow[]) : null;
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    return rows.map((r) =>
+      r.status === "waiting" || r.status === "uploading"
+        ? { ...r, status: "stopped", message: "The page was reloaded before this video was sent." }
+        : r.status === "processing"
+          ? { ...r, message: "Open it to see how far it is." }
+          : r,
+    );
+  } catch {
+    return null;
+  }
+}
 
 function remember(id: string | null) {
   try {
@@ -46,13 +77,18 @@ function Studio({ account }: { account: AccountInfo }) {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<(() => void) | null>(null);
   const loadedRef = useRef(false); // result + versions fetched for the current job
+  const [batchRows, setBatchRows] = useState<BatchRow[] | null>(null); // many videos edited one after another
+  const [batchRunning, setBatchRunning] = useState(false);
+  const batchRef = useRef<Batch | null>(null);
 
-  // Resume a job after a page refresh.
+  // Resume a job (or the list of a batch) after a page refresh.
   useEffect(() => {
     try {
       const saved = localStorage.getItem(JOB_STORAGE_KEY);
       // Deferred (not synchronous) so the first client render matches the server render.
       if (saved && /^[0-9a-f]{32}$/.test(saved)) queueMicrotask(() => setJobId(saved));
+      const rows = restoreBatch();
+      if (rows) queueMicrotask(() => setBatchRows(rows));
     } catch {
       /* ignore */
     }
@@ -120,6 +156,46 @@ function Studio({ account }: { account: AccountInfo }) {
     }
   }
 
+  /** Many videos: each is sent after the one before it is finished (the server edits one at a time per person). */
+  function handleStartBatch(items: Picked[], settings: EditSettings) {
+    setError(null);
+    const batch = createBatch(
+      items,
+      settings,
+      {
+        upload: (file, s, onProgress) => uploadVideo(file, s, onProgress),
+        poll: async (id) => {
+          const j = await getJob(id);
+          return { status: j.status, progress: j.progress, stage: j.stage, error: j.error };
+        },
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      },
+      (rows) => {
+        setBatchRows(rows);
+        saveBatch(rows);
+        account.refresh(); // a video was sent: the daily count changed
+      },
+    );
+    batchRef.current = batch;
+    setBatchRows(batch.rows());
+    setBatchRunning(true);
+    void batch.start().finally(() => {
+      setBatchRunning(false);
+      account.refresh();
+    });
+  }
+
+  function openFromBatch(id: string) {
+    remember(id);
+    setJobId(id);
+  }
+
+  function newUpload() {
+    batchRef.current = null;
+    setBatchRows(null);
+    saveBatch(null);
+  }
+
   async function handleRevise(body: RevisionBody): Promise<string | null> {
     if (!jobId) return "No video is open.";
     try {
@@ -146,7 +222,7 @@ function Studio({ account }: { account: AccountInfo }) {
     account.refresh();
   }
 
-  const view = result ? "result" : jobId ? "processing" : "upload";
+  const view = result ? "result" : jobId ? "processing" : batchRows ? "batch" : "upload";
 
   return (
     <Shell user={account.user} onSignOut={account.user ? account.signOut : undefined} wide={view === "result"} section="video">
@@ -157,8 +233,13 @@ function Studio({ account }: { account: AccountInfo }) {
           error={error}
           blockedReason={quotaBlock(account.user?.quota.videos, "video", "videos")}
           onStart={handleStart}
+          onStartBatch={handleStartBatch}
           onCancel={() => abortRef.current?.()}
         />
+      )}
+
+      {view === "batch" && batchRows && (
+        <BatchView rows={batchRows} running={batchRunning} onOpen={openFromBatch} onCancel={() => batchRef.current?.cancel()} onNew={newUpload} />
       )}
 
       {view === "processing" &&
