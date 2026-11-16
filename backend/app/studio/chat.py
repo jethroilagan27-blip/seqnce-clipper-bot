@@ -18,7 +18,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ..ai import AIError, get_provider
+from ..ai import AIError, get_provider, no_key_reason
 from .schemas import Scene, StudioDoc
 
 log = logging.getLogger(__name__)
@@ -417,10 +417,10 @@ class Outcome:
 
 
 def run_turn(message: str, doc: StudioDoc, assets: list[dict[str, Any]], feats: dict[str, Any], fonts: list[str],
-             history: list[dict[str, Any]]) -> Outcome:
-    provider = get_provider()
+             history: list[dict[str, Any]], user_id: int | None = None) -> Outcome:
+    provider = get_provider(user_id)
     if provider is None:
-        raise ChatUnavailable("The AI assistant isn't set up on this server (it needs a GEMINI_API_KEY).")
+        raise ChatUnavailable(f"The AI assistant can't run: {no_key_reason()}.")
     prompt = build_prompt(message, doc, assets, fonts, history, blocked_tools(feats))
 
     def ask(text: str) -> AiStudioReply:

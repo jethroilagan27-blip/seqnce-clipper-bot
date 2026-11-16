@@ -33,9 +33,9 @@ type Props = {
 // remove one, delete its tab below, plus its app/ folder and components/ folder.
 function ModeSwitch({ section, studio }: { section: "video" | "photos" | "studio"; studio: boolean }) {
   const tab = (on: boolean) =>
-    `rounded-lg px-4 py-2 text-sm ${on ? "bg-violet-600 font-semibold text-white" : "text-white/60 hover:bg-white/5 hover:text-white"}`;
+    `flex-1 whitespace-nowrap rounded-lg px-2 py-2.5 text-center text-[13px] sm:flex-none sm:px-4 sm:text-sm ${on ? "bg-violet-600 font-semibold text-white" : "text-white/60 hover:bg-white/5 hover:text-white"}`;
   return (
-    <nav aria-label="What do you want to edit?" className="mb-6 inline-flex gap-1 rounded-xl bg-white/5 p-1">
+    <nav aria-label="What do you want to edit?" className="mb-6 flex w-full gap-1 rounded-xl bg-white/5 p-1 sm:inline-flex sm:w-auto">
       <Link href="/" aria-current={section === "video" ? "page" : undefined} className={tab(section === "video")}>
         Edit with video
       </Link>
@@ -57,15 +57,17 @@ export default function Shell({ user, onSignOut, wide, section, children }: Prop
   const showStudio = user ? !!user.features?.studio : true; // accounts without the Studio feature never see the tab (with no accounts: everyone has it)
   return (
     <main className={`mx-auto w-full flex-1 px-5 py-10 ${wide === "xl" ? "max-w-7xl" : wide ? "max-w-5xl" : "max-w-xl"}`}>
-      <header className="mb-8 flex items-center gap-3">
-        <Image src="/logo.png" alt="" width={40} height={40} priority className="h-10 w-10 shrink-0 rounded-xl" />
-        <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-semibold leading-tight">Seqnce</h1>
-          <p className="text-sm text-white/50">Turn raw footage into a ready-to-post short.</p>
-        </div>
+      <header className="mb-8 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Link href="/" className="flex min-w-0 flex-1 basis-56 items-center gap-3" aria-label="Seqnce home">
+          <Image src="/logo.png" alt="" width={40} height={40} priority className="h-10 w-10 shrink-0 rounded-xl" />
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold leading-tight">Seqnce</h1>
+            <p className="text-sm text-white/50">Turn raw footage into a ready-to-post short.</p>
+          </div>
+        </Link>
         {user && (
-          <div className="shrink-0 text-right text-xs text-white/50">
-            <p className="max-w-[11rem] truncate" title={user.email}>
+          <div className="w-full shrink-0 text-xs text-white/50 sm:w-auto sm:text-right">
+            <p className="truncate sm:max-w-[11rem]" title={user.email}>
               {user.email}
             </p>
             <p>
@@ -74,15 +76,26 @@ export default function Shell({ user, onSignOut, wide, section, children }: Prop
                   {left} of {v!.limit} video{v!.limit === 1 ? "" : "s"} left ·{" "}
                 </span>
               )}
+              <Link href="/settings" className="underline hover:text-white">
+                Settings
+              </Link>
               {onSignOut && (
-                <button onClick={onSignOut} className="underline hover:text-white">
-                  Sign out
-                </button>
+                <>
+                  {" · "}
+                  <button onClick={onSignOut} className="underline hover:text-white">
+                    Sign out
+                  </button>
+                </>
               )}
             </p>
           </div>
         )}
       </header>
+      {section && user?.ai?.mode === "own" && !user.ai.has_key && (
+        <Link href="/settings" className="mb-5 block rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100 hover:bg-amber-400/15">
+          Add your Gemini key in Settings to turn the AI on. Until then videos get a basic cut and the chat can&apos;t answer. →
+        </Link>
+      )}
       {section && <ModeSwitch section={section} studio={showStudio} />}
       {children}
     </main>

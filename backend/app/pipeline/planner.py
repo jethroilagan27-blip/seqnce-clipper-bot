@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 from .. import db
-from ..ai import AIError, get_provider
+from ..ai import AIError, get_provider, no_key_reason
 from ..errors import PipelineError
 from ..ai.schemas import PlanProposal
 from ..plan.schema import Captions, EditingPlan, Hook, Music, Reframe, Silence, Summary
@@ -98,8 +98,8 @@ def run(job: dict[str, Any]) -> None:
     visual = job.get("visual_json") or {}
 
     plan: EditingPlan | None = None
-    fallback_reason = "no API key configured"
-    provider = get_provider()
+    fallback_reason = no_key_reason()
+    provider = get_provider(job.get("user_id"))
 
     if provider is not None:
         visual_text = (

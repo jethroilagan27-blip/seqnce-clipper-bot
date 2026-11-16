@@ -1,5 +1,6 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import RegisterSW from "@/components/RegisterSW";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,6 +16,17 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Seqnce – AI short-form video editor",
   description: "Upload raw footage and get an automatically edited vertical short.",
+  applicationName: "Seqnce",
+  appleWebApp: { capable: true, title: "Seqnce", statusBarStyle: "black-translucent" },
+  formatDetection: { telephone: false },
+};
+
+// Phones: full-width layout, the dark colour behind the status bar, and the page may draw under a notch (see globals.css).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#0b0b10",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -23,7 +35,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <RegisterSW />
+      </body>
     </html>
   );
 }

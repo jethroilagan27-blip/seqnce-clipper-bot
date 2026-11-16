@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import db
-from ..ai import AIError, LabeledImage, get_provider
+from ..ai import AIError, LabeledImage, get_provider, no_key_reason
 from ..ai.schemas import VisualAnalysis
 from ..config import get_settings
 from ..services import frames as frames_svc
@@ -80,10 +80,10 @@ def run(job: dict[str, Any]) -> None:
         job_id, len(all_frames), len(scenes), len(chosen),
     )
 
-    provider = get_provider()
+    provider = get_provider(job.get("user_id"))
     if provider is None:
-        log.warning("job %s: GEMINI_API_KEY not set - using neutral visual analysis", job_id)
-        result = neutral_analysis("no API key configured")
+        log.warning("job %s: no Gemini key to use - using neutral visual analysis", job_id)
+        result = neutral_analysis(no_key_reason())
     else:
         try:
             excerpt = " ".join(s["text"] for s in load_transcript(job)["segments"])[:600]

@@ -73,7 +73,7 @@ def test_ai_failure_does_not_kill_job(client: TestClient, sample_video: Path, mo
         def generate_structured(self, *a, **k):
             raise AIError("quota exceeded")
 
-    monkeypatch.setattr("app.pipeline.visual.get_provider", lambda: Broken())
+    monkeypatch.setattr("app.pipeline.visual.get_provider", lambda *a, **k: Broken())
     job_id = _upload(client, sample_video).json()["job_id"]
     job = _wait_done(client, job_id)
     assert job["status"] == "completed"

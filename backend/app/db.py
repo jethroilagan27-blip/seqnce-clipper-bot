@@ -57,6 +57,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL
 );
+-- Each account's own Gemini key, encrypted (see aikeys.py). `hint` is the last 4 characters, the only part ever shown.
+CREATE TABLE IF NOT EXISTS user_ai_keys (
+    user_id    INTEGER PRIMARY KEY,
+    ciphertext TEXT NOT NULL,
+    hint       TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS invites (
     code_hash  TEXT PRIMARY KEY,
     email      TEXT,                            -- when set, only this address can use the code
@@ -333,6 +340,26 @@ def get_user(user_id: int) -> dict[str, Any] | None:
     with connect() as conn:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     return dict(row) if row else None
+
+
+def set_ai_key(user_id: int, ciphertext: str, hint: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO user_ai_keys (user_id, ciphertext, hint, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET ciphertext = excluded.ciphertext, hint = excluded.hint, updated_at = excluded.updated_at",
+            (user_id, ciphertext, hint, _now()),
+        )
+
+
+def get_ai_key(user_id: int) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM user_ai_keys WHERE user_id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def delete_ai_key(user_id: int) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM user_ai_keys WHERE user_id = ?", (user_id,))
 
 
 def get_user_by_email(email: str) -> dict[str, Any] | None:

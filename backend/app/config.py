@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     # --- accounts (off by default: local use needs no login) ----------------
     auth_enabled: bool = False  # True = invite-only accounts, per-user ownership and quotas
     auth_secret: str = ""  # signs media tokens; empty = a random one is created once in storage/.auth_secret
+    ai_key_secret: str = ""  # encrypts the Gemini keys people save; empty = a random one is created once in storage/.ai_key_secret
     session_days: int = 14
     daily_video_limit: int = 3  # uploads per rolling 24 h for a normal user (admins: unlimited)
     daily_chat_limit: int = 20  # AI chat messages per rolling 24 h for a normal user

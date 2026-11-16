@@ -50,7 +50,7 @@ class FakeAI:
 def ai(monkeypatch: pytest.MonkeyPatch):
     def install(*replies):
         fake = FakeAI(*replies)
-        monkeypatch.setattr(chat, "get_provider", lambda: fake)
+        monkeypatch.setattr(chat, "get_provider", lambda *a, **k: fake)
         return fake
 
     return install
@@ -316,7 +316,7 @@ def test_the_assistant_needs_the_feature_and_uses_the_daily_chat_limit(ac: TestC
 
 def test_without_an_ai_key_it_says_so_and_costs_nothing(client: TestClient, members, monkeypatch: pytest.MonkeyPatch):
     pid, _ = members
-    monkeypatch.setattr(chat, "get_provider", lambda: None)
+    monkeypatch.setattr(chat, "get_provider", lambda *a, **k: None)
     r = _say(client, pid, "hello")
     assert r.status_code == 503 and "GEMINI_API_KEY" in r.json()["detail"]
     assert client.get(f"/api/studio/projects/{pid}/chat").json()["messages"] == []

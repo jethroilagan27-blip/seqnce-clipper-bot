@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from . import auth, chunked, db, slideshow, studio, uploadguard  # slideshow = photo mode, studio = Studio (both self-contained, see their docstrings)
 from .api import auth as auth_api
-from .api import jobs, music, uploads, videos
+from .api import account, jobs, music, uploads, videos
 from .config import get_settings
 from .retention import purge_old_jobs
 from .worker import Worker
@@ -93,6 +93,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_api.router)
     app.include_router(uploads.router)
+    app.include_router(account.router)
     app.include_router(videos.router)
     app.include_router(jobs.router)
     app.include_router(music.router)

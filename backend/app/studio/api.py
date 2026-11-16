@@ -364,7 +364,7 @@ def post_chat(body: ChatBody, project_id: str = PROJECT_ID, user: User = Depends
         f for f in (_family(project_id, a) for a in store.assets(project_id) if a["kind"] == "font") if f
     ]
     try:
-        outcome = chat.run_turn(body.message, doc, store.assets(project_id), feats, fonts, store.chat_history(project_id))
+        outcome = chat.run_turn(body.message, doc, store.assets(project_id), feats, fonts, store.chat_history(project_id), _owner_id(user))
     except chat.ChatUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except chat.ChatFailed as exc:

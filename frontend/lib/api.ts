@@ -255,7 +255,10 @@ export async function authedFetch(path: string, init: RequestInit = {}): Promise
 export type Quota = { used: number; limit: number | null; resets_at: string | null };
 /** What an account may use (plan + per-account changes). The server enforces these; the page only hides or locks things. */
 export type AccountFeatures = Record<string, number | boolean | null> & { studio: boolean };
+/** Whose AI the account uses. "own" = the key it saved in Settings; "server" = the server's (your own computer, or an admin). Never the key itself. */
+export type AiKeyState = { mode: "own" | "server"; has_key: boolean; hint: string | null };
 export type AuthUser = {
+  ai: AiKeyState;
   email: string;
   is_admin: boolean;
   plan: string;
@@ -286,6 +289,20 @@ export async function getHealth(): Promise<{
   if (!res.ok) throw new ApiError(`The server answered HTTP ${res.status}.`);
   return res.json();
 }
+async function accountCall(method: string, body?: unknown): Promise<AiKeyState> {
+  const res = await authedFetch("/api/account/ai-key", {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(errorMessage(data, `Request failed (HTTP ${res.status}).`));
+  return data as AiKeyState;
+}
+/** Save this account's Gemini key (the server checks it with Google first). The key is never sent back. */
+export const saveAiKey = (key: string) => accountCall("PUT", { key });
+export const removeAiKey = () => accountCall("DELETE");
+
 export const login = (email: string, password: string) => postAuth<Session>("/api/auth/login", { email, password });
 export const signup = (invite_code: string, email: string, password: string) =>
   postAuth<Session>("/api/auth/signup", { invite_code, email, password });

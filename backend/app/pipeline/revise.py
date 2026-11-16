@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 from .. import db
-from ..ai import AIError, get_provider
+from ..ai import AIError, get_provider, no_key_reason
 from ..ai.schemas import RevisionProposal
 from ..errors import PipelineError
 from ..plan.schema import EditingPlan
@@ -95,9 +95,9 @@ def run(job: dict[str, Any]) -> None:
     segments = transcript["segments"]
     duration = float(job["metadata_json"]["duration"])
 
-    provider = get_provider()
+    provider = get_provider(job.get("user_id"))
     if provider is None:
-        raise PipelineError("Chat edits need the AI service, but no GEMINI_API_KEY is configured.")
+        raise PipelineError(f"Chat edits need the AI service, which can't run: {no_key_reason()}.")
 
     target = base.target_duration
     feedback = ""

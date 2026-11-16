@@ -3,6 +3,7 @@ name = "svb-backend"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "cryptography>=43",
     "fastapi>=0.162.0",
     "faster-whisper>=1.2.1",
     "google-genai>=3.0.0",

@@ -446,8 +446,24 @@ def ensure_no_other_active_job(user: User) -> None:
         )
 
 
+def ai_key_state(user: User) -> dict[str, Any]:
+    """Does this account have an AI to use, and whose? Never the key itself, only its last 4 characters."""
+    from . import aikeys
+
+    cfg = get_settings()
+    if not cfg.auth_enabled:  # your own computer: the key in .env
+        return {"mode": "server", "has_key": bool(cfg.gemini_api_key), "hint": None}
+    hint = aikeys.hint(user.id) if aikeys.load(user.id) else None
+    if hint:
+        return {"mode": "own", "has_key": True, "hint": hint}
+    if user.is_admin and cfg.gemini_api_key:
+        return {"mode": "server", "has_key": True, "hint": None}  # admins fall back to the server's key
+    return {"mode": "own", "has_key": False, "hint": None}
+
+
 def user_payload(user: User) -> dict[str, Any]:
     return {
+        "ai": ai_key_state(user),
         "email": user.email,
         "is_admin": user.is_admin,
         "plan": "max" if user.is_admin else user.plan,

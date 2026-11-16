@@ -22,10 +22,16 @@ MAX_OUTPUT_TOKENS = 32768
 class GeminiProvider:
     name = "gemini"
 
-    def __init__(self, api_key: str, model: str, max_retries: int = 3) -> None:
+    def __init__(self, api_key: str, model: str, max_retries: int = 3, own_key: bool = False) -> None:
         self._client = genai.Client(api_key=api_key)
+        self._api_key = api_key
         self._model = model
         self._max_retries = max(1, max_retries)
+        self._own_key = own_key  # the key belongs to the person asking: error texts point them to Settings
+
+    def _scrub(self, text: str) -> str:
+        """Never let the key reach a log line or an error message."""
+        return text.replace(self._api_key, "[key]") if self._api_key else text
 
     def generate_structured(
         self,
@@ -54,7 +60,7 @@ class GeminiProvider:
                 )
             except genai_errors.APIError as exc:
                 code = getattr(exc, "code", None)
-                last_error = f"HTTP {code}: {str(exc)[:200]}"
+                last_error = self._scrub(f"HTTP {code}: {str(exc)[:200]}")
                 if code in _RETRYABLE and attempt < self._max_retries:
                     delay = 4 * 2 ** (attempt - 1)  # 4s, 8s, ...
                     log.warning("gemini %s, retry %d in %ds", last_error, attempt, delay)
@@ -62,15 +68,19 @@ class GeminiProvider:
                     continue
                 if code == 429:
                     raise AIError(
-                        "The AI service is rate-limited right now (free-tier quota). Try again in a minute."
+                        "Your Gemini key has used up its quota for now (the free tier has limits). Try again in a minute."
+                        if self._own_key
+                        else "The AI service is rate-limited right now (free-tier quota). Try again in a minute."
                     ) from exc
                 if code in (400, 401, 403):
                     raise AIError(
-                        "The AI service rejected the request. Check GEMINI_API_KEY and GEMINI_MODEL."
+                        "Google rejected your Gemini key. Check it in Settings."
+                        if self._own_key
+                        else "The AI service rejected the request. Check GEMINI_API_KEY and GEMINI_MODEL."
                     ) from exc
                 raise AIError("The AI service is temporarily unavailable.") from exc
             except Exception as exc:  # network errors etc.
-                last_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+                last_error = self._scrub(f"{type(exc).__name__}: {str(exc)[:200]}")
                 if attempt < self._max_retries:
                     time.sleep(2 * attempt)
                     continue
@@ -113,8 +123,17 @@ class GeminiProvider:
         raise AIError(f"The AI request failed ({last_error}).")
 
 
-def make_gemini_provider() -> GeminiProvider | None:
-    cfg = get_settings()
-    if not cfg.gemini_api_key:
-        return None
-    return GeminiProvider(cfg.gemini_api_key, cfg.gemini_model, cfg.ai_max_retries)
+def check_key(api_key: str) -> None:
+    """Ask Google whether this key works (a free call that lists nothing of ours). Raises AIError with a message fit to show."""
+    client = genai.Client(api_key=api_key)  # kept in a variable: a temporary one is closed before the call is made
+    try:
+        client.models.get(model=get_settings().gemini_model)
+    except genai_errors.APIError as exc:
+        code = getattr(exc, "code", None)
+        if code in (400, 401, 403):
+            raise AIError("Google says that key isn't valid. Copy it again from Google AI Studio.") from None
+        if code == 429:
+            return  # a real key that is simply busy right now
+        raise AIError("Google's service had a problem checking the key. Try again in a moment.") from None
+    except Exception:
+        raise AIError("Couldn't reach Google to check the key. Try again in a moment.") from None

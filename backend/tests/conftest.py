@@ -57,9 +57,9 @@ class FakeProvider:
 @pytest.fixture
 def fake_provider(monkeypatch: pytest.MonkeyPatch) -> FakeProvider:
     prov = FakeProvider()
-    monkeypatch.setattr("app.pipeline.visual.get_provider", lambda: prov)
-    monkeypatch.setattr("app.pipeline.planner.get_provider", lambda: prov)
-    monkeypatch.setattr("app.pipeline.revise.get_provider", lambda: prov)
+    monkeypatch.setattr("app.pipeline.visual.get_provider", lambda *a, **k: prov)
+    monkeypatch.setattr("app.pipeline.planner.get_provider", lambda *a, **k: prov)
+    monkeypatch.setattr("app.pipeline.revise.get_provider", lambda *a, **k: prov)
     return prov
 
 
@@ -80,8 +80,8 @@ def client(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.M
     if not request.node.get_closest_marker("real_whisper"):
         monkeypatch.setattr("app.pipeline.transcribe._get_model", lambda: FakeWhisper())
     if not live:
-        monkeypatch.setattr("app.pipeline.visual.get_provider", lambda: None)
-        monkeypatch.setattr("app.pipeline.planner.get_provider", lambda: None)
+        monkeypatch.setattr("app.pipeline.visual.get_provider", lambda *a, **k: None)
+        monkeypatch.setattr("app.pipeline.planner.get_provider", lambda *a, **k: None)
 
     from app.main import create_app
 
