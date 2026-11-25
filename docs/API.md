@@ -18,6 +18,8 @@ Job ids are 32-char lowercase hex; anything else returns `422`. Responses never 
 
 `/api/videos/{id}/preview` and `/download` accept `?version=N` (default: the current version).
 
+**Watching vs downloading:** `/preview` (and photo mode's and Studio's `/video`) send a light copy made right after each render (short side 720, about 1.5 Mbps) so playing doesn't stutter over a home upload line; `/download` is always the full 1080p file (capped at about 5 Mbps, Studio 6). Videos finished before this get their copies with `python -m app.admin light-copies`.
+
 ## POST /api/videos/upload
 `multipart/form-data`:
 - `file` (required) – `.mp4`, ≤ `MAX_UPLOAD_MB`, ≤ `MAX_VIDEO_DURATION_S`, must start with an MP4 `ftyp` box and pass ffprobe.

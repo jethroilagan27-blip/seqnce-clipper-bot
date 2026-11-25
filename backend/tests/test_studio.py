@@ -376,7 +376,7 @@ def test_the_whole_video_with_title_voiceover_crossfade_music_and_fades(client: 
     assert done["status"] == "completed", done["error"]
     assert done["has_output"] and done["output"]["width"] == 1920 and done["output"]["height"] == 1080  # local use = everything on
     assert done["output"]["duration"] == pytest.approx(5.5, abs=0.2)
-    video = _out_path(client, pid, "video", tmp_path)
+    video = _out_path(client, pid, "download", tmp_path)  # full size (/video serves the light playing copy)
     assert _streams(video) == {"video", "audio"}
 
     start = _frame(video, 0.05, tmp_path)

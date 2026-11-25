@@ -21,7 +21,7 @@ from typing import Any, Callable, Literal
 from .. import auth, db, features
 from ..config import get_settings
 from ..editing import overlays as ov
-from ..services import media
+from ..services import media, playback
 from . import store
 from .schemas import (
     AUDIO_RATE,
@@ -629,7 +629,7 @@ def build_final_command(listing: str, total: float, out: Path, bed: AssetRef | N
     tail = f"{LOUDNESS},aresample={AUDIO_RATE}," if doc.normalize_loudness else ""
     chain.append(f"{last}{tail}alimiter=limit=0.97:level=0[aout]")
     if quality == "final":
-        enc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-r", str(FPS),
+        enc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-maxrate", "6M", "-bufsize", "12M", "-pix_fmt", "yuv420p", "-r", str(FPS),
                "-c:a", "aac", "-b:a", "192k", "-ar", str(AUDIO_RATE)]
     else:
         enc = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-pix_fmt", "yuv420p", "-r", str(FPS),
@@ -814,6 +814,8 @@ def render(project_id: str, kind: Literal["final", "preview"], scene_id: str | N
             raise
         final.parent.mkdir(parents=True, exist_ok=True)
         partial.replace(final)
+        if kind == "final":
+            playback.make(final)  # the light copy the in-app players use
         return {**info.to_dict(), "path": str(final)}
     finally:
         shutil.rmtree(work, ignore_errors=True)

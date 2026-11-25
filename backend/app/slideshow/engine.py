@@ -17,7 +17,7 @@ from typing import Any, Callable
 from ..config import get_settings
 from ..editing import captions as cap
 from ..editing.overlays import TextOverlay
-from ..services import media
+from ..services import media, playback
 from . import images, store
 from .schemas import FPS, MAX_TOTAL_SECONDS, SIZES, SlideshowSettings
 
@@ -97,7 +97,7 @@ def build_final_command(
         cmd += ["-vf", "ass=texts.ass"]
     cmd += [
         "-map", "0:v", "-map", audio_map,
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(FPS),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-maxrate", "5M", "-bufsize", "10M", "-pix_fmt", "yuv420p", "-r", str(FPS),
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
         "-t", f"{total:.3f}", "-movflags", "+faststart", str(out),
     ]
@@ -181,6 +181,7 @@ def render(project_id: str, on_progress: Callable[[int], None] | None = None) ->
     finally:
         shutil.rmtree(work, ignore_errors=True)  # the big intermediate clips are no longer needed
     partial.replace(final)
+    playback.make(final)  # the light copy the in-app players use
     return {**info.to_dict(), "path": str(final)}
 
 

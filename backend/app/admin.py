@@ -13,6 +13,7 @@ Run from backend/:   uv run python -m app.admin <command>
   set-feature EMAIL KEY VALUE       change ONE feature for ONE account, e.g. studio on / studio_max_height 720
                                     ("default" removes the change and goes back to what the plan says)
   features EMAIL                    show what the account can use, and which values were changed by hand
+  light-copies                      make the light playing copies for videos finished before they existed
 
 Passwords are read from a hidden prompt, or from the SEQNCE_ADMIN_PASSWORD environment variable for
 scripts. They are never accepted on the command line, so they don't end up in your shell history.
@@ -29,6 +30,8 @@ from typing import Sequence
 import json
 
 from . import auth, db, features
+from .config import get_settings
+from .services import playback
 
 
 def _password(email: str) -> str:
@@ -86,6 +89,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("key", choices=list(features.FEATURES))
     p.add_argument("value", help="on/off or a number, or 'default' to go back to the plan's value")
     sub.add_parser("features").add_argument("email")
+    sub.add_parser("light-copies")
     args = parser.parse_args(argv)
 
     db.init_db()
@@ -160,7 +164,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         _show_features(db.get_user(row["id"]) or row)
     elif args.cmd == "features":
         _show_features(_user(args.email))
+    elif args.cmd == "light-copies":
+        made, looked = make_light_copies()
+        print(f"Looked at {looked} finished video(s); made {made} light cop{'y' if made == 1 else 'ies'}.")
     return 0
+
+
+def make_light_copies() -> tuple[int, int]:
+    """Light playing copies (services/playback.py) for every finished video that has none yet. Safe to run again."""
+    cfg = get_settings()
+    videos = [p for p in cfg.outputs_dir.glob("*.mp4") if not p.name.endswith((".play.mp4", ".partial.mp4"))]
+    videos += [p for kind in ("slideshows", "studio") for p in (cfg.storage_dir / kind).glob("*/output.mp4")]
+    made = sum(playback.make(v) for v in videos if playback.best(v) == v)
+    return made, len(videos)
 
 
 def _show_features(row: dict) -> None:

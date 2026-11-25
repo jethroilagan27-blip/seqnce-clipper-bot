@@ -104,3 +104,14 @@ def test_the_decision_about_a_browser_copy():
     assert prepare.needs_web_copy(info("h264"), "a.mov") is True  # a MOV file: not every browser plays it
     assert prepare.needs_web_copy(info("hevc"), "a.mp4") is True
     assert prepare.needs_web_copy(info("vp9"), "a.webm") is True
+
+
+def test_a_heavy_original_gets_a_light_preview_copy_too():
+    from app.services.media import MediaInfo
+
+    def info(w: int, h: int, seconds: float, mb: float) -> MediaInfo:
+        return MediaInfo(seconds, w, h, 30.0, "h264", True, "aac", 48000, 2, int(mb * 1024 * 1024))
+
+    assert prepare.needs_web_copy(info(576, 1024, 42, 7.4), "a.mp4") is False  # small enough to play as it is
+    assert prepare.needs_web_copy(info(1920, 1080, 10, 1), "a.mp4") is True  # 1080p
+    assert prepare.needs_web_copy(info(720, 1280, 10, 12), "a.mp4") is True  # about 10 Mbps

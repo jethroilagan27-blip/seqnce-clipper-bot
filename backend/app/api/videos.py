@@ -20,7 +20,7 @@ from ..filenames import keep_extension
 from ..pipeline import prepare
 from ..plan.text import clean_instructions
 from ..schemas import EditSettings, UploadResponse
-from ..services import media
+from ..services import media, playback
 from .jobs import JOB_ID, get_job_or_404
 
 log = logging.getLogger(__name__)
@@ -211,7 +211,7 @@ def preview_video(
     job_id: str = JOB_ID, version: int | None = VERSION, user: User = Depends(media_user)
 ) -> FileResponse:
     """Inline playback (supports HTTP Range for seeking)."""
-    return FileResponse(_output_file(job_id, version, user), media_type="video/mp4")
+    return FileResponse(playback.best(_output_file(job_id, version, user)), media_type="video/mp4")  # the light copy; /download is full quality
 
 
 @router.get("/{job_id}/download")

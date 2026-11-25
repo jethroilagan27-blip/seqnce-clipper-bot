@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import auth, chunked, uploadguard
+from ..services import playback
 from ..auth import User, can_access, current_user, ensure_quota, media_user, spend_quota
 from ..config import get_settings
 from ..filenames import keep_extension
@@ -444,7 +445,7 @@ def preview(project_id: str = PROJECT_ID, scene: str | None = Query(None, patter
 
 @router.get("/projects/{project_id}/video")
 def video(project_id: str = PROJECT_ID, user: User = Depends(media_user)) -> FileResponse:
-    return FileResponse(_file(project_id, user, "output"), media_type="video/mp4", headers={"Cache-Control": "no-store"})
+    return FileResponse(playback.best(_file(project_id, user, "output")), media_type="video/mp4", headers={"Cache-Control": "no-store"})
 
 
 @router.get("/projects/{project_id}/download")

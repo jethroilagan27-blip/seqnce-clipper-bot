@@ -26,7 +26,7 @@ from ..auth import (
 )
 from ..config import get_settings
 from ..filenames import keep_extension
-from ..services import media
+from ..services import media, playback
 from . import images, store
 from .schemas import (
     MAX_BATCH_BYTES,
@@ -284,7 +284,7 @@ def _output(project_id: str, user: User) -> FsPath:
 
 @router.get("/{project_id}/video")
 def video(project_id: str = PROJECT_ID, user: User = Depends(media_user)) -> FileResponse:
-    return FileResponse(_output(project_id, user), media_type="video/mp4")
+    return FileResponse(playback.best(_output(project_id, user)), media_type="video/mp4")
 
 
 @router.get("/{project_id}/download")

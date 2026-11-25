@@ -168,7 +168,7 @@ def test_full_flow_photos_in_order_with_music_and_text(client: TestClient, tmp_p
     assert done["output"]["width"] == 1080 and done["output"]["height"] == 1920 and abs(done["output"]["duration"] - 3.0) < 0.2
 
     video = tmp_path / "out.mp4"
-    video.write_bytes(client.get(f"/api/slideshows/{pid}/video").content)
+    video.write_bytes(client.get(f"/api/slideshows/{pid}/download").content)
     probe = subprocess.run([get_settings().ffprobe, "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(video)],
                            capture_output=True, text=True).stdout.split()
     assert "video" in probe and "audio" in probe  # the music is in there
@@ -197,7 +197,7 @@ def test_without_text_nothing_is_drawn_and_without_music_the_video_is_silent_but
     done = _wait(client, pid)
     assert done["status"] == "completed" and (done["output"]["width"], done["output"]["height"]) == (1080, 1080)
     video = tmp_path / "o.mp4"
-    video.write_bytes(client.get(f"/api/slideshows/{pid}/video").content)
+    video.write_bytes(client.get(f"/api/slideshows/{pid}/download").content)
     white = lambda im: sum(1 for x in range(0, 1080, 20) for y in range(0, 1080, 20) if min(im.getpixel((x, y))) > 200)
     assert white(_frame(video, 0.5, tmp_path)) == 0
     assert "audio" in subprocess.run([get_settings().ffprobe, "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(video)],

@@ -25,7 +25,11 @@ def web_copy_path(job_id: str) -> Path:
 
 
 def needs_web_copy(info: media.MediaInfo, filename: str) -> bool:
-    """Browsers play H.264 in an MP4. Phone footage is often HEVC, or a MOV / MKV, which many browsers can't show."""
+    """Browsers play H.264 in an MP4; phone footage is often HEVC, or a MOV / MKV, which many browsers can't show.
+    And a big original (1080p+ or several Mbps) would stutter over the internet: the in-app preview gets a light copy."""
+    heavy = max(info.width, info.height) > 1280 or info.size_bytes * 8 > 2_500_000 * max(info.duration, 0.1)
+    if heavy:
+        return True
     return info.video_codec != "h264" or Path(filename).suffix.lower() not in (".mp4", ".m4v")
 
 
@@ -37,6 +41,7 @@ def make_web_copy(src: Path, dst: Path) -> bool:
         proc = media.run_tool(
             [get_settings().ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(src),
              "-vf", "scale=-2:'min(720,ih)',format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+             "-maxrate", "2M", "-bufsize", "4M",
              "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(part)],
             timeout=60 * 60,
         )

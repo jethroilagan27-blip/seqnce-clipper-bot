@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import db
 from .config import get_settings
+from .services import playback
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ def purge_old_jobs(retention_days: int) -> int:
             for p in files:
                 if p:
                     Path(p).unlink(missing_ok=True)
+                    playback.delete(Path(p))
             conn.execute("DELETE FROM plan_versions WHERE job_id = ?", (r["id"],))
             shutil.rmtree(cfg.temp_dir / r["id"], ignore_errors=True)
             (cfg.subtitles_dir / f"{r['id']}.ass").unlink(missing_ok=True)

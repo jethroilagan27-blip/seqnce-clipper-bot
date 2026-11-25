@@ -10,7 +10,7 @@ from typing import Any
 from .. import db, stages
 from ..config import get_settings
 from ..editing.ffgraph import OUT_H, OUT_W
-from ..services import media
+from ..services import media, playback
 from .editor import resolve_music
 from .prepare import job_temp_dir
 
@@ -38,7 +38,8 @@ def run(job: dict[str, Any]) -> None:
     cmd += [
         "-/filter_complex", "filter.txt",
         "-map", "[vout]", "-map", "[aout]",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+        "-maxrate", "5M", "-bufsize", "10M",  # plenty for 1080x1920 social video, and a file that downloads in seconds
         "-profile:v", "high", "-r", "30",
         "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
         "-movflags", "+faststart",
@@ -65,6 +66,7 @@ def run(job: dict[str, Any]) -> None:
         raise
 
     partial.replace(final)
+    playback.make(final)  # the light copy the in-app players use
     db.update_job(job_id, output_path=str(final), output_metadata_json=info.to_dict())
     log.info("job %s: rendered %.1fs, %.1f MB", job_id, info.duration, info.size_bytes / 1e6)
 
