@@ -84,7 +84,7 @@ export default function PhotoGrid({ projectId, photos, disabled, onReorder }: Pr
               setDragging(null);
               setOver(null);
             }}
-            className={`group relative aspect-square overflow-hidden rounded-lg border bg-[#15151c] ${
+            className={`group relative aspect-square overflow-hidden rounded-lg border bg-field ${
               over === p.id ? "border-violet-400" : "border-white/10"
             } ${dragging === p.id ? "opacity-40" : ""}`}
           >

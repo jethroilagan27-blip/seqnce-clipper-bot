@@ -3,15 +3,74 @@
 :root {
   --background: #0b0b10;
   --foreground: #f3f3f6;
+  --field: #15151c; /* inputs */
+  --panel: #14141b; /* menus, floating bars */
   color-scheme: dark;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-field: var(--field);
+  --color-panel: var(--panel);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
+
+/* ---- Light theme ----------------------------------------------------------------------------------------------
+   The pages are written for dark: "white" at various strengths is used for text, lines and soft fills. In the light
+   theme "white" simply becomes ink, so all of those flip together. Where something sits on violet or on video
+   (buttons, previews, filmstrips: .on-dark) real white is put back. */
+html[data-theme="light"] {
+  --background: #f6f6f9;
+  --foreground: #16161d;
+  --field: #ffffff;
+  --panel: #ffffff;
+  color-scheme: light;
+  --color-white: #16161d;
+  /* pale text colours made for dark backgrounds get their deep versions */
+  --color-amber-100: #78350f;
+  --color-amber-200: #92400e;
+  --color-amber-300: #b45309;
+  --color-red-100: #7f1d1d;
+  --color-red-200: #991b1b;
+  --color-red-300: #b91c1c;
+  --color-emerald-100: #064e3b;
+  --color-emerald-300: #047857;
+  --color-violet-200: #5b21b6;
+  --color-violet-300: #6d28d9;
+}
+/* faint grey text needs to be stronger on a light page to stay readable */
+html[data-theme="light"] :is(.text-white\/30, .text-white\/35) { color: color-mix(in srgb, var(--color-white) 52%, transparent); }
+html[data-theme="light"] .text-white\/40 { color: color-mix(in srgb, var(--color-white) 62%, transparent); }
+html[data-theme="light"] :is(.text-white\/50, .text-white\/55) { color: color-mix(in srgb, var(--color-white) 70%, transparent); }
+html[data-theme="light"] :is(.bg-violet-600:not(:disabled), .bg-violet-500:not(:disabled), [class^="bg-black"], [class*=" bg-black"], .on-dark) {
+  --color-white: #ffffff;
+  color: #ffffff;
+}
+
+/* the phone's ☰ menu (components/MobileMenu.tsx) */
+.menu-sheet {
+  position: fixed;
+  inset: 0 0 0 auto;
+  margin: 0;
+  width: min(20rem, 86vw);
+  height: 100dvh;
+  max-height: none;
+  overflow-y: auto;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) 0;
+  background: var(--panel);
+  color: var(--foreground);
+}
+.menu-sheet[open] { animation: menu-in 0.2s ease-out; }
+.menu-sheet::backdrop { background: rgba(0, 0, 0, 0.55); }
+@keyframes menu-in {
+  from { transform: translateX(100%); }
+  to { transform: none; }
+}
+body:has(.menu-sheet[open]) { overflow: hidden; }
 
 body {
   background: var(--background);
@@ -49,5 +108,5 @@ body {
   animation: seqnce-shimmer 1.6s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .seqnce-in, .seqnce-pop, .seqnce-shimmer { animation: none; }
+  .seqnce-in, .seqnce-pop, .seqnce-shimmer, .menu-sheet[open] { animation: none; }
 }

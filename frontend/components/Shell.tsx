@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { AuthUser, Quota } from "@/lib/api";
+import MobileMenu from "./MobileMenu";
 
 /** "in about 3 hours" style wait until a quota unit frees up. */
 export function waitPhrase(resetsAt: string | null): string {
@@ -56,8 +57,17 @@ export default function Shell({ user, onSignOut, wide, section, children }: Prop
   const left = v && v.limit !== null ? Math.max(0, v.limit - v.used) : null;
   const showStudio = user ? !!user.features?.studio : true; // accounts without the Studio feature never see the tab (with no accounts: everyone has it)
   return (
-    <main className={`mx-auto w-full flex-1 px-5 py-10 ${wide === "xl" ? "max-w-7xl" : wide ? "max-w-5xl" : "max-w-xl"}`}>
-      <header className="mb-8 flex flex-wrap items-center gap-x-3 gap-y-2">
+    <main className={`mx-auto w-full flex-1 px-4 pb-10 pt-3 sm:px-5 sm:pt-10 ${wide === "xl" ? "max-w-7xl" : wide ? "max-w-5xl" : "max-w-xl"}`}>
+      {/* phone: logo in the corner, the name beside it, the menu on the right */}
+      <header className="mb-5 flex items-center gap-3 sm:hidden">
+        <Link href="/" className="flex min-w-0 flex-1 items-center gap-2.5" aria-label="Seqnce home">
+          <Image src="/logo.png" alt="" width={40} height={40} priority className="h-10 w-10 shrink-0 rounded-xl" />
+          <h1 className="truncate text-xl font-semibold">Seqnce</h1>
+        </Link>
+        <MobileMenu user={user} onSignOut={onSignOut} />
+      </header>
+      {/* wider screens */}
+      <header className="mb-8 hidden flex-wrap items-center gap-x-3 gap-y-2 sm:flex">
         <Link href="/" className="flex min-w-0 flex-1 basis-56 items-center gap-3" aria-label="Seqnce home">
           <Image src="/logo.png" alt="" width={40} height={40} priority className="h-10 w-10 shrink-0 rounded-xl" />
           <div className="min-w-0">

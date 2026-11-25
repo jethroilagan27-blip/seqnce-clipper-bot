@@ -21,7 +21,7 @@ const STYLES: { key: TextStyle; label: string }[] = [
   { key: "plain", label: "Plain" },
 ];
 
-const num = "w-20 rounded-md border border-white/10 bg-[#15151c] px-2 py-1 text-sm tabular-nums disabled:opacity-50";
+const num = "w-20 rounded-md border border-white/10 bg-field px-2 py-1 text-sm tabular-nums disabled:opacity-50";
 
 // Add your own text, then drag it on the preview. Everything about a text (words, colour, size, style, when it shows) is here.
 export default function TextEditor({ texts, selectedId, total, disabled, onChange, onSelect, extra }: Props) {
@@ -84,7 +84,7 @@ export default function TextEditor({ texts, selectedId, total, disabled, onChang
                     disabled={disabled}
                     onChange={(e) => patch(t.id, { text: e.target.value || " " })}
                     aria-label="Text"
-                    className="w-full resize-none rounded-md border border-white/10 bg-[#15151c] px-3 py-2 focus:border-violet-400 focus:outline-none disabled:opacity-50"
+                    className="w-full resize-none rounded-md border border-white/10 bg-field px-3 py-2 focus:border-violet-400 focus:outline-none disabled:opacity-50"
                   />
                   <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Colour">
                     {TEXT_COLORS.map((c) => (

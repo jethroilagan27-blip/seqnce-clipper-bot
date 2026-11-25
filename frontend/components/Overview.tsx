@@ -38,7 +38,7 @@ export default function Overview({ jobId, duration, aspect, clips, ghosts = [], 
   return (
     <div className="space-y-1.5">
       <div
-        className="relative h-14 cursor-pointer overflow-hidden rounded-lg border border-white/10"
+        className="on-dark relative h-14 cursor-pointer overflow-hidden rounded-lg border border-white/10"
         onClick={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           onSeek(((e.clientX - rect.left) / rect.width) * duration);

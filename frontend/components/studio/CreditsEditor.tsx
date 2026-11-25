@@ -27,7 +27,7 @@ export default function CreditsEditor({ credits, fonts, limits, disabled, onChan
         spellCheck={false}
         disabled={disabled}
         aria-label="Credits, one line per row"
-        className="w-full rounded-lg border border-white/10 bg-[#15151c] px-3 py-2 font-mono text-sm focus:border-violet-400 focus:outline-none disabled:opacity-50"
+        className="w-full rounded-lg border border-white/10 bg-field px-3 py-2 font-mono text-sm focus:border-violet-400 focus:outline-none disabled:opacity-50"
         placeholder={"# Directed by\nMichael Gracey\n\n# Cast\nHugh Jackman"}
         onChange={(e) => {
           setText(e.target.value);

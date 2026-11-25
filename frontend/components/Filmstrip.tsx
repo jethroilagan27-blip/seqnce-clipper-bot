@@ -35,7 +35,7 @@ export default function Filmstrip({ jobId, start, end, aspect, height, className
     <div
       ref={ref}
       aria-hidden
-      className={`grid overflow-hidden bg-[#15151c] ${className}`}
+      className={`grid overflow-hidden bg-field ${className}`}
       style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))`, height }}
     >
       {Array.from({ length: count }, (_, i) => (

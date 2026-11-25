@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import InlineScript from "@/components/InlineScript";
 import RegisterSW from "@/components/RegisterSW";
+import { DEFAULT_THEME, THEME_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -34,7 +36,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      data-theme={DEFAULT_THEME}
+      suppressHydrationWarning // the script below may change data-theme before React starts
     >
+      <head>
+        <InlineScript html={THEME_SCRIPT} />
+      </head>
       <body className="min-h-full flex flex-col">
         {children}
         <RegisterSW />

@@ -257,7 +257,7 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
             value={settings.instructions}
             onChange={(e) => setSettings({ ...settings, instructions: e.target.value })}
             placeholder="e.g. Focus on the pricing tips, skip the intro story, make the hook a question."
-            className="mt-2 w-full resize-none rounded-md border border-white/10 bg-[#15151c] px-3 py-2 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none"
+            className="mt-2 w-full resize-none rounded-md border border-white/10 bg-field px-3 py-2 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none"
           />
         </div>
         <Toggle
@@ -294,7 +294,7 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
               value={settings.music_track ?? ""}
               disabled={busy}
               onChange={(e) => setSettings({ ...settings, music_track: e.target.value })}
-              className="w-full rounded-lg border border-white/10 bg-[#15151c] px-4 py-3 text-sm"
+              className="w-full rounded-lg border border-white/10 bg-field px-4 py-3 text-sm"
               aria-label="Music track"
             >
               {tracks.map((t) => (

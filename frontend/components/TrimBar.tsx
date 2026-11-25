@@ -55,7 +55,7 @@ export default function TrimBar({ jobId, aspect, clips, index, duration, segment
   return (
     <div className="space-y-3">
       <div className="space-y-1">
-        <div data-trackbar className="relative h-16 select-none overflow-hidden rounded-lg border border-white/15">
+        <div data-trackbar className="on-dark relative h-16 select-none overflow-hidden rounded-lg border border-white/15">
           <Filmstrip jobId={jobId} start={win.start} end={win.end} aspect={aspect} height={64} className="absolute inset-0" />
           <div className="pointer-events-none absolute inset-y-0 left-0 bg-black/70" style={{ width: pos(clip.start) }} />
           <div className="pointer-events-none absolute inset-y-0 right-0 bg-black/70" style={{ left: pos(clip.end) }} />

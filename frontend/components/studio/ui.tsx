@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 
 export const inputCls =
-  "rounded-md border border-white/10 bg-[#15151c] px-2 py-1 text-sm focus:border-violet-400 focus:outline-none disabled:opacity-50";
+  "rounded-md border border-white/10 bg-field px-2 py-1 text-sm focus:border-violet-400 focus:outline-none disabled:opacity-50";
 export const buttonCls =
   "rounded-lg border border-white/15 px-3 py-1.5 text-sm text-white/80 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40";
 export const primaryCls =

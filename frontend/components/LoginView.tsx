@@ -34,7 +34,7 @@ export default function LoginView({ onSession, notice, openSignup = false }: Pro
   }
 
   const input =
-    "w-full rounded-lg border border-white/10 bg-[#15151c] px-3 py-2.5 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none disabled:opacity-50";
+    "w-full rounded-lg border border-white/10 bg-field px-3 py-2.5 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none disabled:opacity-50";
 
   return (
     <div className="mx-auto w-full max-w-sm space-y-5">

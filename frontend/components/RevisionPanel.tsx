@@ -199,7 +199,7 @@ export default function RevisionPanel({ versions, selected, job, busy, onSend, o
             }}
             aria-label="Tell the editor what to change"
             placeholder={busy ? "Working on your last request…" : "e.g. Cut the part about pricing, and make the hook a question"}
-            className="min-h-11 flex-1 resize-none rounded-lg border border-white/10 bg-[#15151c] px-3 py-2 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none disabled:opacity-50"
+            className="min-h-11 flex-1 resize-none rounded-lg border border-white/10 bg-field px-3 py-2 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none disabled:opacity-50"
           />
           <button
             type="submit"

@@ -477,7 +477,7 @@ export default function PhotoStudio({ account }: { account: AccountInfo }) {
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
                 <label className="flex items-center gap-2 text-white/70">
                   Photos that don&apos;t fit
-                  <select value={settings.fill} disabled={locked} onChange={(e) => change({ fill: e.target.value as PhotoSettings["fill"] })} className="rounded-md border border-white/10 bg-[#15151c] px-2 py-1">
+                  <select value={settings.fill} disabled={locked} onChange={(e) => change({ fill: e.target.value as PhotoSettings["fill"] })} className="rounded-md border border-white/10 bg-field px-2 py-1">
                     <option value="blur">Blurred background</option>
                     <option value="crop">Crop to fill</option>
                     <option value="black">Black bars</option>

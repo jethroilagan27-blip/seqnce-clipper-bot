@@ -408,7 +408,7 @@ function TextOnFrame({ project, scene, duration, fonts, limits, disabled, onChan
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div className="space-y-2">
         <div
-          className="relative w-full overflow-hidden rounded-lg"
+          className="on-dark relative w-full overflow-hidden rounded-lg"
           style={{ aspectRatio: ratio, containerType: "inline-size", background: scene.background }}
         >
           {first && (

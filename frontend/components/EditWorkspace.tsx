@@ -419,7 +419,7 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
                     onChange={(e) => change({ hookText: e.target.value })}
                     aria-label="Hook title text"
                     placeholder="Type a title (max 8 words)"
-                    className="w-full rounded-md border border-white/10 bg-[#15151c] px-3 py-2 text-sm font-semibold uppercase focus:border-violet-400 focus:outline-none"
+                    className="w-full rounded-md border border-white/10 bg-field px-3 py-2 text-sm font-semibold uppercase focus:border-violet-400 focus:outline-none"
                     style={{ color: HOOK_CSS[draft.hookColor] ?? "#ffe600" }}
                   />
                   <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Hook colour">
@@ -509,7 +509,7 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
 
         {plan.warnings.length > 0 && <p className="text-xs text-white/40">Notes: {plan.warnings.join(" · ")}</p>}
 
-        <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/15 bg-[#14141b]/95 px-4 py-3 shadow-xl backdrop-blur">
+        <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/15 bg-panel/95 px-4 py-3 shadow-xl backdrop-blur">
           {isCurrent ? (
             <>
               <p className="min-w-0 text-sm">

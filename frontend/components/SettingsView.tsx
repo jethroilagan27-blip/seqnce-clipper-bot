@@ -1,13 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { ApiError, removeAiKey, saveAiKey } from "@/lib/api";
+import AccountSummary from "./AccountSummary";
 import type { AccountInfo } from "./AuthGate";
 import InstallHint from "./InstallHint";
 import Shell from "./Shell";
+import ThemeSwitch from "./ThemeSwitch";
 
 const input =
-  "w-full rounded-lg border border-white/10 bg-[#15151c] px-3 py-2.5 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none disabled:opacity-50";
+  "w-full rounded-lg border border-white/10 bg-field px-3 py-2.5 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none disabled:opacity-50";
 
 // Settings of the signed-in account. For now: the account's own Gemini key. The key is typed here once and is never shown
 // again (the server only reports its last 4 characters), so there is nothing on this page to copy or leak.
@@ -56,7 +59,28 @@ export default function SettingsView({ account }: { account: AccountInfo }) {
   return (
     <Shell user={user} onSignOut={user ? account.signOut : undefined}>
       <div className="space-y-6">
-        <h2 className="text-lg font-semibold">Settings</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Account settings</h2>
+          <Link href="/" className="text-sm text-violet-300 underline">
+            ← Back to editing
+          </Link>
+        </div>
+
+        {user && (
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4 sm:p-5" aria-label="Your account">
+            <AccountSummary user={user} />
+            <button type="button" onClick={account.signOut} className="rounded-lg border border-white/15 px-4 py-2.5 text-sm text-white/80 hover:bg-white/5">
+              Sign out
+            </button>
+          </section>
+        )}
+
+        <section className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4 sm:p-5" aria-labelledby="look-h">
+          <h3 id="look-h" className="font-semibold">
+            Appearance
+          </h3>
+          <ThemeSwitch />
+        </section>
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4 sm:p-5" aria-labelledby="ai-key-h">
           <div>

@@ -44,7 +44,7 @@ export default function OverlaysEditor({ project, scene, disabled, onChange }: P
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div className="space-y-2">
-        <div className="relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: ratio, containerType: "inline-size", background: scene.background }}>
+        <div className="on-dark relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: ratio, containerType: "inline-size", background: scene.background }}>
           {base && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={thumbUrl(project.id, base.id)} alt="" className="absolute inset-0 h-full w-full object-cover opacity-70" />

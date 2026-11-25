@@ -75,7 +75,7 @@ export default function ChatPanel({ messages, canUndo, thinking, locked, error, 
         }}
         aria-label="Message for the assistant"
         placeholder="Type your instructions here or tell the assistant what to change…"
-        className="w-full rounded-lg border border-white/10 bg-[#15151c] px-3 py-2 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none disabled:opacity-50"
+        className="w-full rounded-lg border border-white/10 bg-field px-3 py-2 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none disabled:opacity-50"
       />
       <div className="flex flex-wrap items-center gap-2">
         <button className={primaryCls} disabled={!text.trim() || thinking || locked} onClick={send}>
