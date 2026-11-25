@@ -9,7 +9,7 @@ else's key.
 from __future__ import annotations
 
 from ..config import get_settings
-from .base import AIError, AIProvider, AIQuotaError, LabeledImage, VideoInput
+from .base import AIError, AIProvider, LabeledImage, VideoInput
 
 
 def get_provider(user_id: int | None = None) -> AIProvider | None:
@@ -28,7 +28,7 @@ def get_provider(user_id: int | None = None) -> AIProvider | None:
                 return None
     if not cfg.gemini_api_key:
         return None
-    return GeminiProvider(cfg.gemini_api_key, cfg.gemini_model, cfg.ai_max_retries, backup_key=cfg.gemini_api_key_backup.strip())
+    return GeminiProvider(cfg.gemini_api_key, cfg.gemini_model, cfg.ai_max_retries)
 
 
 def no_key_reason() -> str:
@@ -38,4 +38,4 @@ def no_key_reason() -> str:
     return "no API key configured (set GEMINI_API_KEY in the .env file)"
 
 
-__all__ = ["AIError", "AIProvider", "AIQuotaError", "LabeledImage", "VideoInput", "get_provider", "no_key_reason"]
+__all__ = ["AIError", "AIProvider", "LabeledImage", "VideoInput", "get_provider", "no_key_reason"]

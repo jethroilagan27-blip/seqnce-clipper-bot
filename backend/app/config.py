@@ -53,7 +53,6 @@ class Settings(BaseSettings):
 
     # --- AI (used from Day 3 onwards) --------------------------------------
     gemini_api_key: str = ""
-    gemini_api_key_backup: str = ""  # used only for a request the key above refuses because it has reached its limit
     gemini_model: str = "gemini-3.5-flash"
     whisper_model: str = "small"
     whisper_device: str = "cpu"  # "cpu" or "cuda"

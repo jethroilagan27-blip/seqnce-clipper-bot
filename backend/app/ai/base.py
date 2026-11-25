@@ -21,10 +21,6 @@ class AIError(PipelineError):
     """AI call failed (quota, network, malformed output...). Message is user-safe."""
 
 
-class AIQuotaError(AIError):
-    """The key has reached its usage limit (HTTP 429). A backup key, if there is one, takes over."""
-
-
 @dataclass
 class LabeledImage:
     label: str  # e.g. "Frame at 12.0s" - shown to the model before the image
