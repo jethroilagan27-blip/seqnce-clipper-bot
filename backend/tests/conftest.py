@@ -75,6 +75,7 @@ def client(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.M
     live = bool(request.node.get_closest_marker("live_ai"))
     if not live:
         monkeypatch.setenv("GEMINI_API_KEY", "")
+        monkeypatch.setenv("GEMINI_API_KEY_BACKUP", "")
     get_settings.cache_clear()
 
     if not request.node.get_closest_marker("real_whisper"):

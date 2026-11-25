@@ -12,7 +12,7 @@ from google.genai import types
 from pydantic import ValidationError
 
 from ..config import get_settings
-from .base import AIError, LabeledImage, T, VideoInput
+from .base import AIError, AIQuotaError, LabeledImage, T, VideoInput
 
 log = logging.getLogger(__name__)
 
@@ -25,12 +25,26 @@ UPLOAD_WAIT_S = 5 * 60
 class GeminiProvider:
     name = "gemini"
 
-    def __init__(self, api_key: str, model: str, max_retries: int = 3, own_key: bool = False) -> None:
+    def __init__(self, api_key: str, model: str, max_retries: int = 3, own_key: bool = False,
+                 backup_key: str = "", key_name: str = "GEMINI_API_KEY") -> None:
         self._client = genai.Client(api_key=api_key)
         self._api_key = api_key
         self._model = model
         self._max_retries = max(1, max_retries)
         self._own_key = own_key  # the key belongs to the person asking: error texts point them to the Me page
+        self._key_name = key_name  # which setting to check when Google rejects it
+        # Used only when this key has reached its limit, and only for that request: the next one tries this key first again.
+        self._backup = (GeminiProvider(backup_key, model, max_retries, key_name="GEMINI_API_KEY_BACKUP")
+                        if backup_key and backup_key != api_key else None)
+
+    def _or_backup(self, call):
+        try:
+            return call(self)
+        except AIQuotaError:
+            if self._backup is None:
+                raise
+            log.warning("gemini: %s has reached its limit; using the backup key for this request", self._key_name)
+            return call(self._backup)
 
     def _scrub(self, text: str) -> str:
         """Never let the key reach a log line or an error message."""
@@ -42,6 +56,13 @@ class GeminiProvider:
         response_model: type[T],
         images: list[LabeledImage] | None = None,
     ) -> T:
+        return self._or_backup(lambda p: p._structured(prompt, response_model, images))
+
+    def generate_from_video(self, prompt: str, response_model: type[T], video: VideoInput) -> T:
+        # the whole thing, upload included, is redone with the backup: an uploaded file belongs to the key that sent it
+        return self._or_backup(lambda p: p._from_video(prompt, response_model, video))
+
+    def _structured(self, prompt: str, response_model: type[T], images: list[LabeledImage] | None) -> T:
         contents: list[types.Part | str] = []
         for img in images or []:
             contents.append(img.label)
@@ -49,7 +70,7 @@ class GeminiProvider:
         contents.append(prompt)
         return self._ask(contents, response_model, len(images or []))
 
-    def generate_from_video(self, prompt: str, response_model: type[T], video: VideoInput) -> T:
+    def _from_video(self, prompt: str, response_model: type[T], video: VideoInput) -> T:
         """The model watches the video itself. Small ones travel inside the request; bigger ones are uploaded to Google's
         file store first and deleted again straight afterwards."""
         sampling = types.VideoMetadata(fps=video.fps)
@@ -78,6 +99,8 @@ class GeminiProvider:
                 file = self._client.files.get(name=file.name)
         except genai_errors.APIError as exc:
             log.warning("gemini upload failed: %s", self._scrub(str(exc)[:200]))
+            if getattr(exc, "code", None) == 429:
+                raise AIQuotaError(self._limit_message()) from exc
             raise AIError("The video couldn't be sent to the AI.") from exc
         except Exception as exc:
             log.warning("gemini upload failed: %s", self._scrub(f"{type(exc).__name__}: {str(exc)[:200]}"))
@@ -85,6 +108,11 @@ class GeminiProvider:
         if getattr(file.state, "name", str(file.state)) != "ACTIVE":
             raise AIError("The AI service couldn't read the video.")
         return file
+
+    def _limit_message(self) -> str:
+        if self._own_key:
+            return "Your Gemini key has used up its quota for now (the free tier has limits). Try again in a minute."
+        return "The AI service is rate-limited right now (free-tier quota). Try again in a few minutes, or tomorrow if today's limit is used up."
 
     def _ask(self, contents: list, response_model: type[T], image_count: int, media_resolution=None) -> T:
         config = types.GenerateContentConfig(
@@ -104,22 +132,19 @@ class GeminiProvider:
             except genai_errors.APIError as exc:
                 code = getattr(exc, "code", None)
                 last_error = self._scrub(f"HTTP {code}: {str(exc)[:200]}")
-                if code in _RETRYABLE and attempt < self._max_retries:
+                switch_now = code == 429 and self._backup is not None  # no point waiting: the backup can take it
+                if code in _RETRYABLE and attempt < self._max_retries and not switch_now:
                     delay = 4 * 2 ** (attempt - 1)  # 4s, 8s, ...
                     log.warning("gemini %s, retry %d in %ds", last_error, attempt, delay)
                     time.sleep(delay)
                     continue
                 if code == 429:
-                    raise AIError(
-                        "Your Gemini key has used up its quota for now (the free tier has limits). Try again in a minute."
-                        if self._own_key
-                        else "The AI service is rate-limited right now (free-tier quota). Try again in a few minutes, or tomorrow if today's limit is used up."
-                    ) from exc
+                    raise AIQuotaError(self._limit_message()) from exc
                 if code in (400, 401, 403):
                     raise AIError(
                         "Google rejected your Gemini key. Check it on the Me page."
                         if self._own_key
-                        else "The AI service rejected the request. Check GEMINI_API_KEY and GEMINI_MODEL."
+                        else f"The AI service rejected the request. Check {self._key_name} and GEMINI_MODEL."
                     ) from exc
                 raise AIError("The AI service is temporarily unavailable.") from exc
             except Exception as exc:  # network errors etc.

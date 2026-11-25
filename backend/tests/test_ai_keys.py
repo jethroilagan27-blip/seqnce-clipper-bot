@@ -70,6 +70,28 @@ def test_a_wrong_key_is_not_saved(ac: TestClient, monkeypatch: pytest.MonkeyPatc
         assert ac.put("/api/account/ai-key", json={"key": junk}, headers=_h(token)).status_code in (422,), junk
 
 
+def test_the_newer_key_format_with_a_dot_is_accepted(ac: TestClient):
+    token, uid = _join(ac, "a@example.com")
+    newer = "AQ.Fake0000000000000000000000000000000000000000000000_x"
+    assert ac.put("/api/account/ai-key", json={"key": newer}, headers=_h(token)).status_code == 200
+    assert aikeys.load(uid) == newer
+
+
+def test_the_backup_key_is_only_for_the_servers_key(ac: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "server-key-" + "s" * 20)
+    monkeypatch.setenv("GEMINI_API_KEY_BACKUP", "backup-key-" + "b" * 20)
+    monkeypatch.setenv("SHARE_SERVER_AI_KEY", "true")
+    get_settings.cache_clear()
+    ta, ua = _join(ac, "a@example.com")
+    _, ub = _join(ac, "b@example.com")
+    shared = get_provider(ub)
+    assert shared is not None and shared._backup is not None and shared._backup._api_key.startswith("backup-key-")  # type: ignore[attr-defined]
+    ac.put("/api/account/ai-key", json={"key": KEY_A}, headers=_h(ta))
+    assert get_provider(ua)._backup is None  # someone's own key never spills over onto yours  # type: ignore[union-attr]
+    for url in ("/api/auth/me", "/api/account/ai-key"):
+        assert "backup-key-" not in ac.get(url, headers=_h(ta)).text
+
+
 def test_checking_keys_is_limited(ac: TestClient):
     token, _ = _join(ac, "a@example.com")
     codes = [ac.put("/api/account/ai-key", json={"key": KEY_A}, headers=_h(token)).status_code for _ in range(aikeys.TRIES_PER_WINDOW + 2)]

@@ -6,9 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from google.genai import errors
 from pydantic import BaseModel
 
-from app.ai import AIError, VideoInput, gemini
+from app.ai import AIError, AIQuotaError, VideoInput, gemini
 from app.ai.gemini import MAX_OUTPUT_TOKENS, GeminiProvider
 
 
@@ -56,6 +57,95 @@ def test_if_every_try_is_cut_off_the_user_is_told_to_send_less(monkeypatch: pyte
     provider, _ = _provider([_response("MAX_TOKENS", Reply(text="a")), _response("MAX_TOKENS", Reply(text="b"))], monkeypatch)
     with pytest.raises(AIError, match="too long"):
         provider.generate_structured("p", Reply)
+
+
+# ---------- the backup key ----------
+
+def _client(outcomes: list, seen: list, name: str):
+    """A stand-in client: each outcome is an HTTP error code or a reply."""
+
+    def generate_content(model, contents, config):
+        seen.append(name)
+        result = outcomes.pop(0)
+        if isinstance(result, int):
+            raise errors.ClientError(result, {"error": {"message": "nope"}})
+        return result
+
+    return SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
+
+
+def _pair(monkeypatch: pytest.MonkeyPatch, first: list, second: list, retries: int = 3) -> tuple[GeminiProvider, list]:
+    provider = GeminiProvider("first-key", "m", max_retries=retries, backup_key="second-key")
+    seen: list = []
+    provider._client = _client(first, seen, "first")
+    provider._backup._client = _client(second, seen, "backup")
+    monkeypatch.setattr(gemini.time, "sleep", lambda s: None)
+    return provider, seen
+
+
+def _ok(text: str):
+    return _response("STOP", Reply(text=text))
+
+
+def test_the_backup_is_not_touched_while_the_first_key_works(monkeypatch: pytest.MonkeyPatch):
+    provider, seen = _pair(monkeypatch, [_ok("a")], [])
+    assert provider.generate_structured("p", Reply).text == "a" and seen == ["first"]
+
+
+def test_at_the_limit_the_backup_answers_at_once_and_the_first_is_tried_again_next_time(monkeypatch: pytest.MonkeyPatch):
+    provider, seen = _pair(monkeypatch, [429, _ok("first again")], [_ok("from backup")])
+    assert provider.generate_structured("p", Reply).text == "from backup"
+    assert seen == ["first", "backup"]  # no waiting and retrying on the full key
+    assert provider.generate_structured("p", Reply).text == "first again"
+    assert seen[-1] == "first"
+
+
+@pytest.mark.parametrize("code", [400, 401, 403, 500, 503])
+def test_other_problems_do_not_use_the_backup(monkeypatch: pytest.MonkeyPatch, code: int):
+    provider, seen = _pair(monkeypatch, [code, code, code], [_ok("should not be used")])
+    with pytest.raises(AIError):
+        provider.generate_structured("p", Reply)
+    assert "backup" not in seen
+
+
+def test_when_both_are_at_the_limit_the_user_is_told(monkeypatch: pytest.MonkeyPatch):
+    provider, seen = _pair(monkeypatch, [429], [429, 429, 429])
+    with pytest.raises(AIQuotaError, match="rate-limited"):
+        provider.generate_structured("p", Reply)
+    assert seen == ["first", "backup", "backup", "backup"]
+
+
+def test_a_rejected_backup_key_is_named(monkeypatch: pytest.MonkeyPatch):
+    provider, _ = _pair(monkeypatch, [429], [401])
+    with pytest.raises(AIError, match="GEMINI_API_KEY_BACKUP") as info:
+        provider.generate_structured("p", Reply)
+    assert "second-key" not in str(info.value)
+
+
+def test_without_a_backup_the_limit_is_retried_then_reported(monkeypatch: pytest.MonkeyPatch):
+    provider = GeminiProvider("first-key", "m", max_retries=2)
+    seen: list = []
+    provider._client = _client([429, 429], seen, "first")
+    monkeypatch.setattr(gemini.time, "sleep", lambda s: None)
+    with pytest.raises(AIQuotaError):
+        provider.generate_structured("p", Reply)
+    assert seen == ["first", "first"]
+    assert GeminiProvider("same", "m", backup_key="same")._backup is None  # the same key twice is no backup
+
+
+def test_a_video_is_sent_again_with_the_backup_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setattr(gemini, "INLINE_VIDEO_BYTES", 100)  # through the file store, which belongs to one key
+    first, first_seen = _video_provider(monkeypatch)
+    second, second_seen = _video_provider(monkeypatch)
+
+    def full(model, contents, config):
+        raise errors.ClientError(429, {"error": {"message": "quota"}})
+
+    first._client.models = SimpleNamespace(generate_content=full)
+    first._backup = second
+    assert first.generate_from_video("p", Reply, VideoInput(_video_file(tmp_path), fps=1)).text == "watched"
+    assert len(first_seen["uploaded"]) == 1 and first_seen["deleted"] == ["files/abc"]  # tidied up
+    assert len(second_seen["uploaded"]) == 1 and len(second_seen["calls"]) == 1  # uploaded afresh with the backup
 
 
 # ---------- watching a video ----------
