@@ -21,7 +21,7 @@ type Props = {
 
 const pct = (t: number, duration: number) => `${(Math.min(Math.max(t, 0), duration) / duration) * 100}%`;
 
-// The whole uploaded video as a strip of frames. Bright = in your short, dimmed = cut out.
+// The whole uploaded video as a strip of frames. Bright = in the new video, dimmed = cut out.
 // Read-only on purpose: trimming happens on the part cards, where the scale is readable.
 export default function Overview({ jobId, duration, aspect, clips, ghosts = [], selected, playheadSrc, pending, onSelect, onSeek }: Props) {
   const sorted = clips.map((c, i) => ({ ...c, i })).sort((a, b) => a.start - b.start);

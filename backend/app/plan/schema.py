@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, model_serializer, model_validator
 
 from ..editing.fixes import MAX_FIXES, CaptionFix
 from ..editing.overlays import MAX_TEXTS, TextOverlay
 
 Purpose = Literal["hook", "main_content", "example", "conclusion"]
+MIN_TARGET_S, MAX_TARGET_S = 15, 600  # the finished length that can be asked for
 
 
 class Clip(BaseModel):
@@ -44,10 +45,24 @@ class Summary(BaseModel):
     main_message: str = ""
 
 
+AspectRatio = Literal["9:16", "16:9"]
+SIZES: dict[str, tuple[int, int]] = {"9:16": (1080, 1920), "16:9": (1920, 1080)}
+SHAPE_NAMES = {"9:16": "upright (9:16)", "16:9": "landscape (16:9)"}
+
+
 class Format(BaseModel):
-    aspect_ratio: Literal["9:16"] = "9:16"
+    aspect_ratio: AspectRatio = "9:16"
     width: int = 1080
     height: int = 1920
+
+    @model_validator(mode="after")
+    def _size_follows_the_shape(self) -> "Format":
+        self.width, self.height = SIZES[self.aspect_ratio]
+        return self
+
+    @property
+    def size(self) -> tuple[int, int]:
+        return self.width, self.height
 
 
 class Reframe(BaseModel):

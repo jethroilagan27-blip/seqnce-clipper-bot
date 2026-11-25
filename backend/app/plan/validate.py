@@ -150,8 +150,8 @@ def repair_and_validate(
 
 
 MIN_MANUAL_CLIP_S = 1.0
-MAX_MANUAL_TOTAL_S = 180.0  # 3 minutes: the longest short we let a hand edit produce
-MAX_CLIPS = 30
+MAX_MANUAL_TOTAL_S = 900.0  # 15 minutes: the longest video we let a hand edit produce
+MAX_CLIPS = 120
 
 
 def validate_manual_clips(proposed: Sequence[Any], video_duration: float) -> list[Clip]:

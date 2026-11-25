@@ -61,6 +61,9 @@ def _settings_changes(old: dict[str, Any], new: dict[str, Any]) -> list[dict[str
         return bool(h.get("enabled")), h.get("text", ""), h.get("color", "")
 
     out: list[dict[str, str]] = []
+    oshape, nshape = ((p.get("format") or {}).get("aspect_ratio", "9:16") for p in (old, new))
+    if oshape != nshape:
+        out.append({"field": "Shape", "before": oshape, "after": nshape})
     (oe, ot, oc), (ne, nt, nc) = hook(old), hook(new)
     if oe != ne:
         out.append({"field": "Hook title", "before": "on" if oe else "off", "after": "on" if ne else "off"})

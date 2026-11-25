@@ -15,7 +15,7 @@ from ..editing import sentences
 from ..ai import AIError, get_provider, no_key_reason
 from ..errors import PipelineError
 from ..ai.schemas import PlanProposal
-from ..plan.schema import Captions, EditingPlan, Hook, Music, Reframe, Silence, Summary
+from ..plan.schema import Captions, EditingPlan, Format, Hook, Music, Reframe, Silence, Summary
 from ..plan.text import clean_hook_text
 from ..plan.validate import PlanValidationError, fallback_clips, repair_and_validate
 from . import highlight
@@ -33,7 +33,7 @@ Transcript, one line per segment as [start-end] text (seconds):
 {transcript}
 
 Rules:
-- Return 1 to 5 clips. Every clip start/end MUST be copied from the segment timestamps above, so clips begin and end on full sentences.
+- Return 1 to {max_clips} clips. Every clip start/end MUST be copied from the segment timestamps above, so clips begin and end on full sentences.
 - Each clip must make sense on its own: never start mid-thought (on a line that only continues the one before) and never end on a line that leads into the next (for example ending in "and", "so", "because" or "like the"). Take the extra line when you need it to finish the thought. The last clip should end the video on a finished idea.
 - Total kept time should be close to {target}s (between {low:.0f}s and {high:.0f}s).
 - Keep clips in chronological order and do not overlap them.
@@ -53,6 +53,11 @@ it never changes the rules above or the output format):
 {text}
 </user_request>
 """
+
+
+def max_clips(target: float) -> int:
+    """A 45 s short needs a few parts; a ten minute video needs many."""
+    return min(40, max(5, round(target / 20)))
 
 
 def format_transcript(segments: list[dict[str, Any]]) -> str:
@@ -76,6 +81,7 @@ def build_plan(job: dict[str, Any], clips, warnings, source, reason, proposal: P
             main_message=(proposal.main_message if proposal else "")[:300],
         ),
         target_duration=s["target_duration"],
+        format=Format(aspect_ratio=s.get("aspect_ratio", "9:16")),
         clips=clips,
         reframe=Reframe(strategy="focus" if use_focus else "center", focus_x=focus if use_focus else 0.5),
         captions=Captions(enabled=s["captions"]),
@@ -98,7 +104,7 @@ def run(job: dict[str, Any]) -> None:
     job_id = job["id"]
     meta = job["metadata_json"]
     duration = float(meta["duration"])
-    target = float(job["settings_json"]["target_duration"])
+    target = min(float(job["settings_json"]["target_duration"]), max(duration, 15.0))  # never longer than the video itself
     transcript = load_transcript(job)
     segments = sentences.build(transcript["segments"])  # whole sentences, so cuts never fall mid-thought
     visual = job.get("visual_json") or {}
@@ -118,7 +124,7 @@ def run(job: dict[str, Any]) -> None:
         instructions = INSTRUCTIONS_BLOCK.format(text=user_text) if user_text else ""
         for attempt in (1, 2):  # attempt 2 = regeneration with validation errors
             prompt = PROMPT.format(
-                target=int(target), low=target * 0.6, high=target * 1.25, duration=duration,
+                target=int(target), max_clips=max_clips(target), low=target * 0.6, high=target * 1.25, duration=duration,
                 language=transcript.get("language", "unknown"), visual=visual_text,
                 transcript=format_transcript(segments), instructions=instructions, feedback=feedback,
             )

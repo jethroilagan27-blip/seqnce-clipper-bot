@@ -159,10 +159,12 @@ def render_ass(
     """Safe area: 8 % side margins; captions sit above the TikTok/Reels bottom UI and the
     hook sits below the top bar, in the upper part of the frame. A dragged position replaces
     the default one for captions / hook; `texts` are free text placed by the user."""
+    short = min(width, height)  # lettering follows the short side, so it is the same size upright and landscape
+    wide = width > height  # a landscape video has no app buttons along the bottom to stay above
     header = ASS_HEADER.format(
-        w=width, h=height, size=round(width * 0.07), mx=round(width * 0.08), mv=round(height * 0.22),
-        hsize=round(width * 0.105), hcolor=HOOK_ASS_COLORS.get(hook.color if hook else "yellow", HOOK_ASS_COLORS["yellow"]),
-        houtline=round(width * 0.011), hshadow=round(width * 0.004), hmv=round(height * 0.115),
+        w=width, h=height, size=round(short * 0.07), mx=round(width * 0.08), mv=round(height * (0.08 if wide else 0.22)),
+        hsize=round(short * 0.105), hcolor=HOOK_ASS_COLORS.get(hook.color if hook else "yellow", HOOK_ASS_COLORS["yellow"]),
+        houtline=round(short * 0.011), hshadow=round(short * 0.004), hmv=round(height * (0.07 if wide else 0.115)),
     )
     cap_tag = _pos_tag(caption_pos, width, height)
     cap_prefix = "{" + cap_tag + "}" if cap_tag else ""

@@ -76,6 +76,7 @@ def upload_video(
     file: UploadFile | None = File(None),
     upload_id: str = Form(""),  # a finished chunked upload (see chunked.py) instead of `file`
     target_duration: int = Form(45),
+    aspect_ratio: str = Form("9:16"),  # "16:9" = landscape
     captions: bool = Form(True),
     remove_silence: bool = Form(True),
     background_music: bool = Form(False),
@@ -92,6 +93,7 @@ def upload_video(
     try:
         edit_settings = EditSettings(
             target_duration=target_duration,
+            aspect_ratio=aspect_ratio,
             captions=captions,
             remove_silence=remove_silence,
             background_music=background_music,

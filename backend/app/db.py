@@ -8,12 +8,15 @@ while the API reads.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 
 from .config import get_settings
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -80,6 +83,15 @@ CREATE TABLE IF NOT EXISTS usage (
 );
 CREATE INDEX IF NOT EXISTS idx_usage ON usage(user_id, kind, created_at);
 
+-- What people did, for the admin page's graphs. (`usage` above only enforces the daily limits and is cleared quickly.)
+CREATE TABLE IF NOT EXISTS activity (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER,                          -- NULL = made without accounts
+    kind       TEXT NOT NULL,                   -- video (a new one) | edit (a change) | ai | ai_own (a request to the AI)
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_activity ON activity(created_at);
+
 -- Every render of a job is a numbered version with its own plan and output file.
 CREATE TABLE IF NOT EXISTS plan_versions (
     job_id               TEXT NOT NULL,
@@ -105,6 +117,7 @@ _JSON_COLUMNS = {
     "revision_json",
 }
 _VERSION_JSON = ("plan_json", "changes_json", "output_metadata_json")
+ACTIVITY_DAYS = 400  # how long the graphs can look back
 
 
 def _now() -> str:
@@ -129,6 +142,7 @@ def init_db() -> None:
     get_settings().ensure_dirs()
     with connect() as conn:
         conn.execute("PRAGMA journal_mode=WAL")
+        counted_before = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'activity'").fetchone()
         conn.executescript(SCHEMA)
         # Tiny migration for databases created before a column existed.
         existing = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
@@ -145,6 +159,32 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'standard'")
         if "features_json" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN features_json TEXT")
+        if not counted_before:  # start the graphs with what is still stored (AI requests were not recorded before)
+            conn.execute("INSERT INTO activity (user_id, kind, created_at) SELECT user_id, 'video', created_at FROM jobs")
+            conn.execute(
+                "INSERT INTO activity (user_id, kind, created_at) SELECT j.user_id, 'edit', v.created_at "
+                "FROM plan_versions v JOIN jobs j ON j.id = v.job_id WHERE v.source IN ('chat', 'manual')"
+            )
+
+
+def _note(conn: sqlite3.Connection, user_id: int | None, kind: str) -> None:
+    conn.execute("INSERT INTO activity (user_id, kind, created_at) VALUES (?, ?, ?)", (user_id, kind, _now()))
+
+
+def record_activity(user_id: int | None, kind: str) -> None:
+    """Count something for the graphs. Never raises: a missing tick must not spoil someone's video."""
+    try:
+        with connect() as conn:
+            _note(conn, user_id, kind)
+    except sqlite3.Error:
+        log.warning("could not record activity %s", kind, exc_info=True)
+
+
+def activity_since(since: str) -> list[tuple[int | None, str, str]]:
+    """(user, kind, time) of everything counted since `since` (an ISO time)."""
+    with connect() as conn:
+        rows = conn.execute("SELECT user_id, kind, created_at FROM activity WHERE created_at >= ?", (since,)).fetchall()
+    return [(r["user_id"], r["kind"], r["created_at"]) for r in rows]
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -183,6 +223,7 @@ def create_job(
                 user_id,
             ),
         )
+        _note(conn, user_id, "video")
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
@@ -224,7 +265,11 @@ def start_revision(
                      AND revision_json IS NULL""",
             (stage, progress, json.dumps(revision), json.dumps(plan) if plan else None, _now(), job_id),
         )
-        return cur.rowcount == 1
+        started = cur.rowcount == 1
+        if started and revision.get("kind") in ("chat", "manual"):  # going back to a version is not a new edit
+            owner = conn.execute("SELECT user_id FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            _note(conn, owner["user_id"], "edit")
+        return started
 
 
 def _version_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -377,7 +422,8 @@ def user_overview(since: str) -> list[dict[str, Any]]:
     """Every account, newest first, with what it has used since `since` (an ISO time). No password hashes, no keys."""
     with connect() as conn:
         rows = conn.execute(
-            """SELECT u.id, u.email, u.is_admin, u.disabled, u.plan, u.created_at,
+            """SELECT u.id, u.email, u.is_admin, u.disabled, u.plan, u.created_at, u.video_limit, u.chat_limit,
+                      u.features_json,
                       (SELECT COUNT(*) FROM jobs j WHERE j.user_id = u.id) AS videos_stored,
                       (SELECT COUNT(*) FROM usage x WHERE x.user_id = u.id AND x.kind = 'video' AND x.created_at > ?) AS videos_recent,
                       (SELECT COUNT(*) FROM usage x WHERE x.user_id = u.id AND x.kind = 'chat' AND x.created_at > ?) AS chats_recent
@@ -543,3 +589,5 @@ def purge_auth() -> None:
         conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
         conn.execute("DELETE FROM invites WHERE expires_at <= ? AND used_at IS NULL", (now,))
         conn.execute("DELETE FROM usage WHERE created_at <= ?", (old,))
+        forgotten = (datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DAYS)).isoformat(timespec="seconds")
+        conn.execute("DELETE FROM activity WHERE created_at <= ?", (forgotten,))

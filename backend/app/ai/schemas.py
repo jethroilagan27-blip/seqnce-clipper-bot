@@ -44,7 +44,10 @@ class RevisionProposal(BaseModel):
     hook_color: Literal["yellow", "white", "red", "cyan", "green", "pink", "orange"]
     captions_enabled: bool
     target_duration: int = Field(
-        description="Aimed-for total length in seconds (15-90). Keep the current value unless the user asks for another length"
+        description="Aimed-for total length in seconds (15-600). Keep the current value unless the user asks for another length"
+    )
+    aspect_ratio: Literal["9:16", "16:9", "unchanged"] = Field(
+        default="unchanged", description="9:16 upright or 16:9 landscape, only if the user asks for the other shape"
     )
 
 
@@ -75,7 +78,10 @@ class HighlightRevision(HighlightProposal):
     """The same, when the user asks to change an existing highlight video."""
 
     reply: str = Field(description="One or two friendly sentences telling the user what you changed (or why you could not)")
-    target_duration: int = Field(description="Wanted total length in seconds (15-90). Keep the current value unless asked for another")
+    target_duration: int = Field(description="Wanted total length in seconds (15-600). Keep the current value unless asked for another")
+    aspect_ratio: Literal["9:16", "16:9", "unchanged"] = Field(
+        default="unchanged", description="9:16 upright or 16:9 landscape, only if the user asks for the other shape"
+    )
     hook_enabled: bool = Field(description="Whether the title at the top is shown")
 
 

@@ -396,7 +396,15 @@ def limit_for(user: User, kind: str) -> int | None:
     if kind == "studio":
         return features_of(user)["studio_renders_per_day"]
     own = user.video_limit if kind == "video" else user.chat_limit
-    return own if own is not None else (cfg.daily_video_limit if kind == "video" else cfg.daily_chat_limit)
+    return own if own is not None else plan_limit(user.plan, kind)
+
+
+def plan_limit(plan: str, kind: str) -> int:
+    """What a plan allows per day for "video" or "chat" before any limit set for one account."""
+    value = features.PLAN_LIMITS.get(plan, features.PLAN_LIMITS[features.DEFAULT_PLAN])[kind]
+    cfg = get_settings()
+    server = cfg.daily_video_limit if kind == "video" else cfg.daily_chat_limit
+    return server if value is None else value
 
 
 def quota_status(user: User, kind: str) -> dict[str, Any]:

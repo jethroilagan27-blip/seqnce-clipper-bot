@@ -40,6 +40,10 @@ html[data-theme="light"] {
   --color-violet-200: #5b21b6;
   --color-violet-300: #6d28d9;
 }
+/* The two lines of the admin usage graph (blue and orange, checked for colour-blind separation on both themes). */
+.viz { --series-1: #3987e5; --series-2: #d95926; }
+html[data-theme="light"] .viz { --series-1: #2a78d6; --series-2: #eb6834; }
+
 /* faint grey text needs to be stronger on a light page to stay readable */
 html[data-theme="light"] :is(.text-white\/30, .text-white\/35) { color: color-mix(in srgb, var(--color-white) 52%, transparent); }
 html[data-theme="light"] .text-white\/40 { color: color-mix(in srgb, var(--color-white) 62%, transparent); }

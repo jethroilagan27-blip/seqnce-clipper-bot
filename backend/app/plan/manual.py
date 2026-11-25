@@ -9,7 +9,7 @@ import copy
 from typing import Any
 
 from ..schemas import ManualEdit
-from .schema import EditingPlan
+from .schema import SHAPE_NAMES, EditingPlan, Format
 from .text import clean_hook_text
 from .validate import PlanValidationError, validate_manual_clips
 
@@ -64,6 +64,10 @@ def apply_manual_edit(
             c["id"] = f"c{i}"
         new["clips"] = kept
         parts.append(f"removed {len(ids)} clip{'s' if len(ids) != 1 else ''}")
+
+    if edit.aspect_ratio is not None and edit.aspect_ratio != (new.get("format") or {}).get("aspect_ratio", "9:16"):
+        new["format"] = Format(aspect_ratio=edit.aspect_ratio).model_dump()
+        parts.append("changed the shape to " + SHAPE_NAMES[edit.aspect_ratio])
 
     hook = new["hook"]
     if edit.hook_text is not None:

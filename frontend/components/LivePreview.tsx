@@ -5,6 +5,7 @@ import DraggableBlock from "@/components/overlay/DraggableBlock";
 import OverlayLayer from "@/components/overlay/OverlayLayer";
 import { HOOK_CSS, originalUrl, type Pos, type TimelineSpec } from "@/lib/api";
 import type { TextOverlay } from "@/lib/overlays";
+import { framingStyle, lettering, ratioOf } from "@/lib/shape";
 import { cutIndexAtOut, formatTime, outToSource, pageAt, sourceToOut } from "@/lib/timeline";
 
 export type PreviewHandle = {
@@ -159,19 +160,19 @@ export default function LivePreview({
   const hookOn = hook.enabled && hook.text.trim() !== "" && t < hook.duration_s;
   const hookOpacity = Math.max(0, Math.min(1, t / 0.18, (hook.duration_s - t) / 0.3));
 
-  // Same crop as the render: a 9:16 window centred on the speaker, or (highlights) on each part's own action.
+  // Same framing as the render: a window of the output's shape on the speaker (highlights: on each part's own action),
+  // or the whole picture.
+  const shape = spec.format?.aspect_ratio;
+  const frameRatio = ratioOf(shape);
+  const { scale, hookTop, captionBottom } = lettering(shape);
+  const width = `min(100%, calc(70vh * ${frameRatio}))`;
   const { width: sw, height: sh } = spec.source;
-  const k = (16 / 9) * (sw / sh); // video width as a multiple of the 9:16 window's width
   const current = spec.cuts.findLast((c) => c.out_start <= t + 0.001);
   const focus = current?.focus_x ?? spec.reframe.focus_x;
-  const left = k >= 1 ? -Math.min(Math.max(focus * k - 0.5, 0), k - 1) * 100 : 0;
-  const videoStyle: React.CSSProperties =
-    k >= 1 && current?.framing !== "whole" // "whole": the full picture, as the finished video shows it
-      ? { position: "absolute", top: 0, height: "100%", width: `${k * 100}%`, left: `${left}%`, maxWidth: "none" }
-      : { position: "absolute", left: 0, width: "100%", top: "50%", transform: "translateY(-50%)" };
+  const videoStyle: React.CSSProperties = framingStyle(sw / sh, frameRatio, focus, current?.framing === "whole");
 
   const stroke = (w: number): React.CSSProperties => ({
-    WebkitTextStroke: `${w}cqw #000`,
+    WebkitTextStroke: `${w * scale}cqw #000`,
     paintOrder: "stroke fill",
     fontFamily: "Arial, Helvetica, sans-serif",
     textAlign: "center",
@@ -191,7 +192,7 @@ export default function LivePreview({
       <div
         data-frame
         className="relative mx-auto overflow-hidden rounded-2xl border border-white/10 bg-black"
-        style={{ aspectRatio: "9 / 16", width: "min(100%, calc(70vh * 9 / 16))", containerType: "inline-size" }}
+        style={{ aspectRatio: frameRatio, width, containerType: "inline-size" }}
       >
         <video
           ref={videoRef}
@@ -217,10 +218,10 @@ export default function LivePreview({
             pos={hPos}
             label="Title"
             onMove={onMoveBlock && ((x, y) => onMoveBlock("hook", x, y))}
-            defaultStyle={{ top: "11.5%", left: "8%", right: "8%" }}
+            defaultStyle={{ top: hookTop, left: "8%", right: "8%" }}
             style={{
               ...stroke(1.2),
-              fontSize: "10.5cqw",
+              fontSize: `${10.5 * scale}cqw`,
               fontWeight: 900,
               lineHeight: 1.12,
               textTransform: "uppercase",
@@ -236,8 +237,8 @@ export default function LivePreview({
             pos={cPos}
             label="Captions"
             onMove={onMoveBlock && ((x, y) => onMoveBlock("caption", x, y))}
-            defaultStyle={{ bottom: "22%", left: "8%", right: "8%" }}
-            style={{ ...stroke(0.9), fontSize: "7cqw", fontWeight: 800, lineHeight: 1.12, color: "#fff", opacity: page ? 1 : 0.4 }}
+            defaultStyle={{ bottom: captionBottom, left: "8%", right: "8%" }}
+            style={{ ...stroke(0.9), fontSize: `${7 * scale}cqw`, fontWeight: 800, lineHeight: 1.12, color: "#fff", opacity: page ? 1 : 0.4 }}
           >
             {page ? page.text : "Your captions show here"}
           </DraggableBlock>
@@ -249,7 +250,7 @@ export default function LivePreview({
         )}
       </div>
 
-      <div className="mx-auto flex items-center gap-2" style={{ width: "min(100%, calc(70vh * 9 / 16))" }}>
+      <div className="mx-auto flex items-center gap-2" style={{ width }}>
         <button
           onClick={toggle}
           disabled={!spec.cuts.length}

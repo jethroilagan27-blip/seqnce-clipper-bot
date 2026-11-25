@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import auth, chunked, uploadguard
+from .. import auth, chunked, db, uploadguard
 from ..services import playback
 from ..auth import User, can_access, current_user, ensure_quota, media_user, spend_quota
 from ..config import get_settings
@@ -421,6 +421,7 @@ def start_render(body: RenderBody, project_id: str = PROJECT_ID, user: User = De
     if body.kind == "final":  # previews are free; the finished video counts against the plan's daily limit
         ensure_quota(user, "studio")
         spend_quota(user, "studio")
+        db.record_activity(user.id or None, "video")
     store.update(project_id, status="queued", progress=0, error=None, stage_text="Waiting its turn",
                  render_kind=body.kind, render_scene=body.scene_id)
     return _out(store.get(project_id) or {}, feats)

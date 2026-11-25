@@ -2,13 +2,14 @@
 
 **Turn a talking-head video into a ready-to-post vertical short, then edit it like you would in a video editor, or just ask for changes in plain words.**
 
-Upload an MP4. Seqnce transcribes it on your computer, asks an AI which parts are worth keeping, and renders a 9:16 short with captions and an optional title, music and chat-driven revisions. You can see the cuts, trim them on a filmstrip timeline, and re-render.
+Upload an MP4. Seqnce transcribes it on your computer, asks an AI which parts are worth keeping, and renders an upright (9:16) or landscape (16:9) video, from 15 seconds to 10 minutes long, with captions and an optional title, music and chat-driven revisions. You can see the cuts, trim them on a filmstrip timeline, and re-render.
 
 > **Early-stage, self-hosted software.** It runs on your own machine. It has **no login and no usage limits of its own**, so do not expose it to the internet as it is (see [Security](#security-and-privacy)).
 
 ## What it does
 
-- **Auto-edit:** local speech-to-text ([faster-whisper](https://github.com/SYSTRAN/faster-whisper)) → Gemini chooses the best moments → FFmpeg cuts, shortens long pauses, crops to 9:16 around the speaker, burns in captions, and mixes optional music.
+- **Auto-edit:** local speech-to-text ([faster-whisper](https://github.com/SYSTRAN/faster-whisper)) → Gemini chooses the best moments → FFmpeg cuts, shortens long pauses, frames the picture around the speaker, burns in captions, and mixes optional music.
+- **Shape and length:** choose upright 9:16 (TikTok, Reels, Shorts) or landscape 16:9 (YouTube, TV), and switch it later in the editor without using the AI. In a landscape video an upright or square clip is shown whole over a blurred copy of itself, never cropped at the head. Lengths go from 15 seconds to 10 minutes (never longer than your footage); long ones take much longer to make.
 - **Highlight videos:** footage without talking (sports, workouts, events, trips, games) becomes a highlight: the AI watches the whole video, picks complete actions (a shot from the build-up to the result, a whole set) and decides for each whether to crop around it or show the full picture. A video with no speech is edited this way automatically. A small copy of the video is sent to Gemini for this. The crop is fixed per part (it doesn't follow a moving subject) and the AI can misjudge, so check the result.
 - **Hook title:** a big coloured headline at the top for the first few seconds (text and colour chosen by the AI, editable).
 - **Tell it what you want:** optional instructions before editing ("focus on the pricing tips, make the hook a question").
@@ -117,6 +118,8 @@ uv run python -m app.admin invite --email friend@example.com     # prints a one-
 uv run python -m app.admin users                                  # who has used what today
 ```
 
+An admin also gets an **Admin page** on the website: a graph of video edits and AI requests (everyone, or one account), and for each account its plan (Standard, or Pro with higher daily limits), its own daily limits, and whether it sees Studio (Beta). There is no pricing: plans are only sets of limits, defined in `backend/app/features.py`.
+
 To let anyone create an account themselves (email, password and confirm password, no invite code), add `OPEN_SIGNUP=true`. There is no email check, so new accounts are capped: `SIGNUP_PER_IP_PER_HOUR=5` per visitor and `SIGNUP_DAILY_CAP=50` for the whole server per day. Each new account still gets only the daily limits above.
 
 With accounts on, nobody can reach any video without signing in, users only ever see their own jobs, uploads are refused before the file is read if you're not signed in, and each user is limited to a few videos and AI chat messages per day and one video at a time. Details: [docs/API.md](docs/API.md#accounts-ownership-and-quotas-auth_enabledtrue).
@@ -132,7 +135,7 @@ This does **not** make the server safe to put on the open internet by itself: se
 
 ## Known limitations
 
-- Talking-head footage works best; there is no face tracking (the 9:16 crop is centred on where the AI says the speaker is).
+- Talking-head footage works best; there is no face tracking (an upright crop is centred on where the AI says the speaker is).
 - Clips stay in chronological order (no re-ordering). Captions are plain pages, not animated word-by-word.
 - 720p sources look soft after the vertical crop; 1080p and up look better.
 - Tested on synthetic samples and a few real vlogs. Accents, noisy audio and very long videos are not well tested.
@@ -141,7 +144,7 @@ This does **not** make the server safe to put on the open internet by itself: se
 ## Tests
 
 ```bash
-cd backend && uv run pytest -q     # 115 tests, no network or real models needed
+cd backend && uv run pytest -q     # no network or real models needed
 cd frontend && npm test            # timeline helper unit tests
 cd frontend && npm run lint && npx tsc --noEmit
 ```

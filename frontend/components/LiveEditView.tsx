@@ -102,7 +102,7 @@ export default function LiveEditView({ job }: { job: Job }) {
     sub = "The transcript appears as it is recognised. You can watch your video while you wait.";
   } else if (job.stage === "planning" && !hasPlan) {
     title = "The AI is choosing the best moments…";
-    sub = "It reads the transcript and decides which parts make a strong short.";
+    sub = "It reads the transcript and decides which parts make a strong video.";
   } else if (hasPlan) {
     title = revealing ? `The AI is picking parts… ${revealed} of ${clips.length}` : `The AI picked ${clips.length} part${clips.length === 1 ? "" : "s"}`;
     sub = `Play the preview now. The final video is still being rendered (${job.progress}%).`;

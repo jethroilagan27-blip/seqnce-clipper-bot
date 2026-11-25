@@ -8,12 +8,15 @@ from pydantic import BaseModel, Field, model_validator
 
 from .editing.fixes import MAX_FIXES, CaptionFix
 from .editing.overlays import MAX_TEXTS, TextOverlay
+from .plan.schema import MAX_TARGET_S, MIN_TARGET_S, AspectRatio
+from .plan.validate import MAX_CLIPS
 
 
 class EditSettings(BaseModel):
     """User-selected editing preferences, stored with the job."""
 
-    target_duration: int = Field(default=45, ge=15, le=90, description="seconds")
+    target_duration: int = Field(default=45, ge=MIN_TARGET_S, le=MAX_TARGET_S, description="seconds")
+    aspect_ratio: AspectRatio = "9:16"  # upright, or landscape "16:9"
     captions: bool = True
     remove_silence: bool = True
     background_music: bool = False
@@ -40,6 +43,7 @@ class ClipEdit(BaseModel):
 class ManualEdit(BaseModel):
     """Hand edits applied to a version (no AI involved)."""
 
+    aspect_ratio: AspectRatio | None = None
     hook_enabled: bool | None = None
     hook_text: str | None = Field(default=None, max_length=200)
     hook_color: HookColorName | None = None
@@ -53,8 +57,8 @@ class ManualEdit(BaseModel):
     hook_y: float | None = Field(default=None, ge=0, le=1)
     reset_positions: list[Literal["caption", "hook"]] = Field(default_factory=list)  # back to the default spot
     texts: list[TextOverlay] | None = Field(default=None, max_length=MAX_TEXTS, description="The complete list of free texts")
-    remove_clips: list[str] = Field(default_factory=list, max_length=20)
-    clips: list[ClipEdit] | None = Field(default=None, max_length=60, description="The complete new clip list")
+    remove_clips: list[str] = Field(default_factory=list, max_length=MAX_CLIPS)
+    clips: list[ClipEdit] | None = Field(default=None, max_length=MAX_CLIPS, description="The complete new clip list")
 
     @model_validator(mode="after")
     def _one_way_to_change_clips(self) -> "ManualEdit":

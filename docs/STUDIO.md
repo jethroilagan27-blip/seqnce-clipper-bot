@@ -43,7 +43,7 @@ Features (all switched on / limited per account): `studio`, `studio_max_projects
 
 New accounts (including open sign-ups) are on **standard**, which has Studio **off**. Admins and local use (accounts off) get everything.
 
-From `backend/` (`uv run python -m app.admin ...`):
+An admin can switch an account's plan, **Studio (Beta)** and the Studio AI assistant on the website's Admin page. Everything else, from `backend/` (`uv run python -m app.admin ...`):
 
 ```
 set-plan EMAIL pro                       put the account on a plan

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Path, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import uploadguard
+from .. import db, uploadguard
 from ..auth import (
     User,
     can_access,
@@ -242,6 +242,7 @@ def start_render(project_id: str = PROJECT_ID, user: User = Depends(current_user
         raise HTTPException(status_code=409, detail="You already have a video being made. Wait for it to finish.")
     ensure_quota(user, "video")
     spend_quota(user, "video")  # a photo video counts like any other video against the daily limit
+    db.record_activity(user.id or None, "video")
     store.update(project_id, status="queued", progress=0, error=None)
     return _out(store.get(project_id) or {})
 

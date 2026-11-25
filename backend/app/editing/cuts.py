@@ -7,7 +7,7 @@ natural beat (we never remove pauses entirely).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Sequence
 
 from ..plan.schema import EditingPlan
@@ -75,6 +75,23 @@ def build_cuts(plan: EditingPlan, words: Sequence[dict[str, Any]], video_duratio
         c.out_start = round(offset, 3)
         offset += c.duration
     return cuts
+
+
+def frame_cuts(cuts: Sequence[Cut], src_w: int, src_h: int, size: tuple[int, int]) -> list[Cut]:
+    """Decide how each piece fills a frame of `size`. An upright frame crops (or shows the whole picture where the plan
+    says so). A landscape frame never cuts the top and bottom off an upright or square-ish source: it shows all of it,
+    over a blurred copy. The preview and the renderer both use this."""
+    out = size[0] / size[1]
+    if out <= 1:
+        return list(cuts)
+    source = src_w / src_h
+    if source < out * 0.9:
+        framing = "whole"
+    elif source <= out * 1.1:
+        framing = None  # already the same shape: nothing to choose
+    else:
+        return list(cuts)  # wider than the frame: crop around the action, unless the plan wants all of it
+    return [replace(c, framing=framing) for c in cuts]
 
 
 def total_duration(cuts: Sequence[Cut]) -> float:

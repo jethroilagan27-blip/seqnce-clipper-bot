@@ -171,9 +171,9 @@ def test_invalid_ai_revision_is_retried_once_then_rejected(client, sample_video,
 
 def test_target_length_requested_by_ai_is_clamped(client, sample_video, fake_provider):
     job_id = _finished_job(client, sample_video, fake_provider)
-    fake_provider.revision_responses = [_revision(target_duration=500, hook_text="Longer")]
+    fake_provider.revision_responses = [_revision(target_duration=5000, hook_text="Longer")]
     _post(client, job_id, {"message": "make it very long"})
-    assert _versions(client, job_id)["versions"][1]["plan"]["target_duration"] == 90
+    assert _versions(client, job_id)["versions"][1]["plan"]["target_duration"] == 600
 
 
 # ---------- manual edits and restore ----------

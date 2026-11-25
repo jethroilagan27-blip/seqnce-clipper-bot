@@ -13,22 +13,27 @@ from .base import AIError, AIProvider, LabeledImage, VideoInput
 
 
 def get_provider(user_id: int | None = None) -> AIProvider | None:
+    from .. import db
     from .gemini import GeminiProvider  # lazy: keeps SDK import off hot paths
 
     cfg = get_settings()
+
+    def count(kind: str):
+        return lambda: db.record_activity(user_id or None, kind)  # for the admin page's graphs
+
     if cfg.auth_enabled:
-        from .. import aikeys, db
+        from .. import aikeys
 
         own = aikeys.load(user_id) if user_id else None
         if own:
-            return GeminiProvider(own, cfg.gemini_model, cfg.ai_max_retries, own_key=True)
+            return GeminiProvider(own, cfg.gemini_model, cfg.ai_max_retries, own_key=True, on_request=count("ai_own"))
         if not cfg.share_server_ai_key:
             user = db.get_user(user_id) if user_id else None
             if not (user and user["is_admin"]):
                 return None
     if not cfg.gemini_api_key:
         return None
-    return GeminiProvider(cfg.gemini_api_key, cfg.gemini_model, cfg.ai_max_retries)
+    return GeminiProvider(cfg.gemini_api_key, cfg.gemini_model, cfg.ai_max_retries, on_request=count("ai"))
 
 
 def no_key_reason() -> str:

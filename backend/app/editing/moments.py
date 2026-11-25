@@ -106,7 +106,7 @@ def _snap_to_cuts(start: float, end: float, cuts: Sequence[float]) -> tuple[floa
 def candidates(motion: np.ndarray, loud: np.ndarray | None, duration: float, cuts: Sequence[float], target: float) -> list[Moment]:
     """Up to ~40 non-overlapping moments worth looking at, in time order."""
     length = clip_length(target)
-    wanted = int(min(40, max(24, np.ceil(target / length) * 2)))
+    wanted = int(min(200, max(24, np.ceil(target / length) * 2)))
     m = normalise(motion)
     a = normalise(loud) if loud is not None else None
     bins = len(m)
@@ -140,7 +140,7 @@ def candidates(motion: np.ndarray, loud: np.ndarray | None, duration: float, cut
                 chosen.append(window(s, e))
                 return
 
-    sections = int(min(10, wanted // 2, max(1, duration // (length * 2))))
+    sections = int(min(max(10, wanted // 4), wanted // 2, max(1, duration // (length * 2))))
     span = duration / sections
     for k in range(sections):  # the best of every stretch of the video
         take([c for c in scored if k * span <= (c.start + c.end) / 2 < (k + 1) * span])

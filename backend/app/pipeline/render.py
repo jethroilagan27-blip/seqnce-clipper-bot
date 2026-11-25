@@ -39,7 +39,7 @@ def run(job: dict[str, Any]) -> None:
         "-/filter_complex", "filter.txt",
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-        "-maxrate", "5M", "-bufsize", "10M",  # plenty for 1080x1920 social video, and a file that downloads in seconds
+        "-maxrate", "5M", "-bufsize", "10M",  # plenty for 1080p social video, and a file that downloads quickly
         "-profile:v", "high", "-r", "30",
         "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
         "-movflags", "+faststart",
@@ -59,8 +59,8 @@ def run(job: dict[str, Any]) -> None:
             db.update_job(job_id, progress=pct)
 
     try:
-        media.run_ffmpeg_with_progress(cmd, work, total, on_progress)
-        info = _verify(partial, total)
+        media.run_ffmpeg_with_progress(cmd, work, total, on_progress, timeout=max(30 * 60, int(total * 12)))  # long videos get longer
+        info = _verify(partial, total, (int(spec.get("width", OUT_W)), int(spec.get("height", OUT_H))))
     except Exception:
         partial.unlink(missing_ok=True)
         raise
@@ -71,12 +71,12 @@ def run(job: dict[str, Any]) -> None:
     log.info("job %s: rendered %.1fs, %.1f MB", job_id, info.duration, info.size_bytes / 1e6)
 
 
-def _verify(path: Path, expected: float) -> media.MediaInfo:
+def _verify(path: Path, expected: float, size: tuple[int, int]) -> media.MediaInfo:
     """Never trust a 'successful' ffmpeg exit: check the file is what we asked for."""
     if not path.is_file() or path.stat().st_size < 10_000:
         raise media.MediaError("The rendered video is missing or empty.")
     info = media.probe(path)
-    if (info.width, info.height) != (OUT_W, OUT_H):
+    if (info.width, info.height) != size:
         raise media.MediaError("The rendered video has the wrong resolution.")
     if not info.has_audio:
         raise media.MediaError("The rendered video has no audio.")

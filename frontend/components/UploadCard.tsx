@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MAX_INSTRUCTIONS, formatBytes, getMusic, getUploadConfig, type EditSettings } from "@/lib/api";
+import { LENGTHS, SHAPES, lengthLabel, lengthStep } from "@/lib/shape";
 import { VIDEO_EXTENSIONS, baseName, folderOf, fromFileList, mergePicked, safeFromDataTransfer, splitByExtension, type Picked } from "@/lib/pickFiles";
 
 type Props = {
@@ -89,6 +90,7 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
   const [tracks, setTracks] = useState<string[] | null>(null);
   const [settings, setSettings] = useState<EditSettings>({
     target_duration: 45,
+    aspect_ratio: "9:16",
     captions: true,
     remove_silence: true,
     background_music: false,
@@ -266,22 +268,46 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
         <div className="rounded-lg border border-white/10 px-4 py-3">
           <div className="flex items-baseline justify-between">
             <span className="text-sm font-medium">Target length</span>
-            <span className="text-sm tabular-nums text-violet-300">{settings.target_duration}s</span>
+            <span className="text-sm tabular-nums text-violet-300">{lengthLabel(settings.target_duration)}</span>
           </div>
           <input
             type="range"
-            min={15}
-            max={90}
-            step={5}
+            min={0}
+            max={LENGTHS.length - 1}
+            step={1}
             disabled={busy}
-            value={settings.target_duration}
-            onChange={(e) => setSettings({ ...settings, target_duration: Number(e.target.value) })}
+            value={lengthStep(settings.target_duration)}
+            onChange={(e) => setSettings({ ...settings, target_duration: LENGTHS[Number(e.target.value)] })}
             className="mt-2 w-full accent-violet-500"
-            aria-label="Target length in seconds"
+            aria-label="Target length"
+            aria-valuetext={lengthLabel(settings.target_duration)}
           />
           <div className="flex justify-between text-xs text-white/40">
-            <span>15s</span>
-            <span>90s</span>
+            <span>{lengthLabel(LENGTHS[0])}</span>
+            <span>{lengthLabel(LENGTHS[LENGTHS.length - 1])}</span>
+          </div>
+          {settings.target_duration > 180 && (
+            <p className="mt-1 text-xs text-white/50">Long videos take much longer to make, and are never longer than your footage.</p>
+          )}
+        </div>
+        <div className="rounded-lg border border-white/10 px-4 py-3">
+          <span className="text-sm font-medium">Shape</span>
+          <div role="group" aria-label="Shape of the video" className="mt-2 grid grid-cols-2 gap-2">
+            {SHAPES.map((shape) => (
+              <button
+                key={shape.value}
+                type="button"
+                aria-pressed={settings.aspect_ratio === shape.value}
+                disabled={busy}
+                onClick={() => setSettings({ ...settings, aspect_ratio: shape.value })}
+                className={`rounded-lg border px-3 py-2 text-left ${
+                  settings.aspect_ratio === shape.value ? "border-violet-400 bg-violet-500/15" : "border-white/10 hover:border-white/30"
+                }`}
+              >
+                <span className="block text-sm font-medium">{shape.label}</span>
+                <span className="block text-xs text-white/50">{shape.hint}</span>
+              </button>
+            ))}
           </div>
         </div>
         <div className="rounded-lg border border-white/10 px-4 py-3">

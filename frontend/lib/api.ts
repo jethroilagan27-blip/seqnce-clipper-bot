@@ -1,6 +1,8 @@
 // Thin client for the FastAPI backend. The browser talks to it directly (CORS is
 // enabled for localhost:3000) so large uploads don't pass through the Next server.
 
+import type { AspectRatio } from "./shape.ts";
+import type { Counts } from "./usage.ts";
 import { DEFAULT_UPLOAD_CONFIG, PieceError, parseUploadConfig, sendPieces, shouldChunk, type Piece, type UploadConfig } from "./chunked";
 import type { TextOverlay } from "./overlays";
 
@@ -17,6 +19,7 @@ export const getUploadConfig = () => uploadConfig;
 
 export type EditSettings = {
   target_duration: number;
+  aspect_ratio?: AspectRatio;
   captions: boolean;
   remove_silence: boolean;
   background_music: boolean;
@@ -82,6 +85,7 @@ export type Hook = { enabled: boolean; text: string; color: string; duration_s: 
 
 export type Plan = {
   style?: "talking" | "highlight";
+  format?: { aspect_ratio: AspectRatio };
   source: "ai" | "fallback";
   fallback_reason: string | null;
   summary: { main_subject: string; main_message: string };
@@ -121,6 +125,7 @@ export type Version = {
 export type Versions = { current: number; versions: Version[] };
 
 export type ManualEdit = {
+  aspect_ratio?: AspectRatio;
   caption_fixes?: { start: number; end: number; text: string }[];
   hook_enabled?: boolean;
   hook_text?: string;
@@ -140,6 +145,7 @@ export type ManualEdit = {
 /** What the browser needs to preview an edit (computed by the server with the renderer's own code). */
 export type TimelineSpec = {
   total: number;
+  format?: { aspect_ratio: AspectRatio };
   cuts: { start: number; end: number; out_start: number; focus_x?: number | null; framing?: "crop" | "whole" | null }[];
   pages: { start: number; end: number; text: string }[];
   captions_enabled: boolean;
@@ -319,19 +325,63 @@ export type AdminAccount = {
   email: string;
   is_admin: boolean;
   disabled: boolean;
-  plan: string;
+  plan: PlanName;
   created_at: string;
   videos_stored: number;
   videos_24h: number;
   chats_24h: number;
+  video_limit: number | null; // set for this account only; null = what the plan says
+  chat_limit: number | null;
+  limits: { videos: number | null; chats: number | null }; // in force now (null = none, for admins)
+  studio: boolean;
+  studio_ai_chat: boolean;
 };
-export type AdminOverview = { totals: { accounts: number; new_24h: number; new_7d: number }; users: AdminAccount[] };
+export type PlanName = "standard" | "pro" | "max";
+export type AdminPlan = { videos: number; chats: number; studio: boolean; studio_ai_chat: boolean };
+export type AdminOverview = {
+  totals: { accounts: number; new_24h: number; new_7d: number };
+  plans: Record<PlanName, AdminPlan>;
+  users: AdminAccount[];
+};
 /** Every account (admins only; for anyone else the server answers "not found"). */
 export async function getAdminUsers(): Promise<AdminOverview> {
   const res = await authedFetch("/api/admin/users");
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(errorMessage(data, `Request failed (HTTP ${res.status}).`));
   return data as AdminOverview;
+}
+
+export type AccountChange = {
+  plan?: PlanName;
+  video_limit?: number | null;
+  chat_limit?: number | null;
+  studio?: boolean | null;
+  studio_ai_chat?: boolean | null;
+};
+/** Change what one account may do (admins only). Returns the account as it is now. */
+export async function changeAccount(id: number, change: AccountChange): Promise<AdminAccount> {
+  const res = await authedFetch(`/api/admin/users/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(change),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(errorMessage(data, `Request failed (HTTP ${res.status}).`));
+  return data as AdminAccount;
+}
+
+export type AdminStats = {
+  days: (Counts & { date: string })[];
+  totals: Counts;
+  per_user: (Counts & { user_id: number })[];
+};
+/** Video edits and AI requests per day (admins only), with days starting at this browser's midnight. */
+export async function getAdminStats(days: number, userId: number | null): Promise<AdminStats> {
+  const who = userId === null ? "" : `&user_id=${userId}`;
+  const res = await authedFetch(`/api/admin/stats?days=${days}&tz=${-new Date().getTimezoneOffset()}${who}`);
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(errorMessage(data, `Request failed (HTTP ${res.status}).`));
+  return data as AdminStats;
 }
 
 export type LibraryItem = {
@@ -476,6 +526,7 @@ function postVideoForm(
     if ("file" in source) form.append("file", source.file);
     else form.append("upload_id", source.uploadId);
     form.append("target_duration", String(settings.target_duration));
+    form.append("aspect_ratio", settings.aspect_ratio ?? "9:16");
     form.append("captions", String(settings.captions));
     form.append("remove_silence", String(settings.remove_silence));
     form.append("background_music", String(settings.background_music));

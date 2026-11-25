@@ -104,6 +104,14 @@ PLANS: dict[str, dict[str, Any]] = {
 }
 DEFAULT_PLAN = "standard"
 
+# Videos and AI chat messages per rolling 24 hours. None = the server's own default (DAILY_VIDEO_LIMIT and
+# DAILY_CHAT_LIMIT). A limit set for one account (admin page, or `set-limits`) comes before these.
+PLAN_LIMITS: dict[str, dict[str, int | None]] = {
+    "standard": {"video": None, "chat": None},
+    "pro": {"video": 15, "chat": 100},
+    "max": {"video": 50, "chat": 300},
+}
+
 _TRUE = {"true", "on", "yes", "1"}
 _FALSE = {"false", "off", "no", "0"}
 

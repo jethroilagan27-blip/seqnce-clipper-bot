@@ -22,6 +22,7 @@ def build_spec(plan: EditingPlan, transcript: dict[str, Any], meta: dict[str, An
     duration = float(meta["duration"])
     words = cuts_mod.flatten_words(transcript)
     cuts = cuts_mod.build_cuts(plan, words, duration)
+    cuts = cuts_mod.frame_cuts(cuts, int(meta["width"]), int(meta["height"]), plan.format.size)
     total = cuts_mod.total_duration(cuts)
 
     pages: list[dict[str, Any]] = []
@@ -34,6 +35,7 @@ def build_spec(plan: EditingPlan, transcript: dict[str, Any], meta: dict[str, An
     hook = plan.hook
     return {
         "total": round(total, 3),
+        "format": plan.format.model_dump(),
         "cuts": [{"start": c.start, "end": c.end, "out_start": c.out_start, "focus_x": c.focus_x, "framing": c.framing} for c in cuts],
         "pages": pages,
         "captions_enabled": plan.captions.enabled,

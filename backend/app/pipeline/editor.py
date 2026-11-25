@@ -15,7 +15,7 @@ from .. import db
 from ..config import get_settings
 from ..editing import captions as cap
 from ..editing import cuts as cuts_mod
-from ..editing.ffgraph import ASS_NAME, OUT_H, OUT_W, build_filtergraph, compute_crop
+from ..editing.ffgraph import ASS_NAME, build_filtergraph, compute_crop
 from ..errors import PipelineError
 from ..plan.schema import EditingPlan
 from .prepare import job_temp_dir
@@ -53,6 +53,9 @@ def run(job: dict[str, Any]) -> None:
     cuts = cuts_mod.build_cuts(plan, words, float(meta["duration"]))
     if not cuts:
         raise PipelineError("The editing plan did not leave any footage to render.")
+    size = plan.format.size  # upright 9:16 or landscape 16:9
+    width, height = int(meta["width"]), int(meta["height"])
+    cuts = cuts_mod.frame_cuts(cuts, width, height, size)
     total = cuts_mod.total_duration(cuts)
 
     warnings = list(plan.warnings)
@@ -79,25 +82,24 @@ def run(job: dict[str, Any]) -> None:
         hook_pos = (plan.hook.x, plan.hook.y) if plan.hook.x is not None and plan.hook.y is not None else None
         (work / ASS_NAME).write_text(
             cap.render_ass(
-                pages, OUT_W, OUT_H, hook=title, total=total,
+                pages, *size, hook=title, total=total,
                 texts=plan.texts, caption_pos=cap_pos, hook_pos=hook_pos,
             ),
             encoding="utf-8",
         )
 
-    width, height = int(meta["width"]), int(meta["height"])
-    crop = compute_crop(width, height, plan.reframe.focus_x)
+    crop = compute_crop(width, height, plan.reframe.focus_x, size)
     crops = None
     if any(c.focus_x is not None for c in cuts):
-        crops = [compute_crop(width, height, plan.reframe.focus_x if c.focus_x is None else c.focus_x) for c in cuts]
+        crops = [compute_crop(width, height, plan.reframe.focus_x if c.focus_x is None else c.focus_x, size) for c in cuts]
     graph = build_filtergraph(
         cuts, crop, captions=captions_on or hook_on or texts_on, music=music is not None,
-        music_volume=plan.music.volume, total=total, crops=crops, has_audio=bool(meta.get("has_audio", True)),
+        music_volume=plan.music.volume, total=total, crops=crops, has_audio=bool(meta.get("has_audio", True)), size=size,
     )
     (work / "filter.txt").write_text(graph, encoding="utf-8")
     (work / "cuts.json").write_text(
         json.dumps({"total": round(total, 3), "cuts": [vars(c) for c in cuts], "music": music.name if music else None,
-                    "captions": captions_on, "hook": hook_on}, indent=1),
+                    "captions": captions_on, "hook": hook_on, "width": size[0], "height": size[1]}, indent=1),
         encoding="utf-8",
     )
 

@@ -10,7 +10,7 @@ from app.ai.schemas import PlanProposal, ProposedClip
 from app.config import get_settings
 from app.plan.preview import build_spec
 from app.plan.schema import Captions, Clip, EditingPlan, Hook
-from app.plan.validate import PlanValidationError, validate_manual_clips
+from app.plan.validate import MAX_CLIPS, PlanValidationError, validate_manual_clips
 from tests.test_upload_flow import _upload, _wait_done
 
 
@@ -35,17 +35,17 @@ def test_manual_clips_are_clamped_to_the_video():
     ([], "at least one clip"),
     ([_c(5, 5.4)], "shorter than"),
     ([_c(float("nan"), 9)], "invalid times"),
-    ([_c(0, 59), _c(100, 290)], "maximum"),
+    ([_c(0, 500), _c(510, 950)], "maximum"),  # over 15 minutes
 ])
 def test_manual_clips_rejections(bad, needle):
     with pytest.raises(PlanValidationError) as exc:
-        validate_manual_clips(bad, 300)
+        validate_manual_clips(bad, 1000)
     assert needle in " ".join(exc.value.errors)
 
 
 def test_manual_clips_count_limit():
     with pytest.raises(PlanValidationError):
-        validate_manual_clips([_c(i * 3, i * 3 + 1.5) for i in range(31)], 600)
+        validate_manual_clips([_c(i * 3, i * 3 + 1.5) for i in range(MAX_CLIPS + 1)], 600)
 
 
 # ---------- build_spec (pure) ----------

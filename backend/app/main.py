@@ -72,7 +72,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cfg.cors_origin_list,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],  # photo mode saves settings/order (PUT) and deletes (DELETE)
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],  # photo mode: PUT and DELETE; admin page: PATCH
         allow_headers=["*"],
     )
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
+from typing import Callable
 
 from google import genai
 from google.genai import errors as genai_errors
@@ -26,13 +27,17 @@ UPLOAD_WAIT_S = 5 * 60
 class GeminiProvider:
     name = "gemini"
 
-    def __init__(self, api_key: str, model: str, max_retries: int = 3, own_key: bool = False) -> None:
+    def __init__(
+        self, api_key: str, model: str, max_retries: int = 3, own_key: bool = False,
+        on_request: Callable[[], None] | None = None,
+    ) -> None:
         drop_unusable_key_log()
         self._client = genai.Client(api_key=api_key)
         self._api_key = api_key
         self._model = model
         self._max_retries = max(1, max_retries)
         self._own_key = own_key  # the key belongs to the person asking: error texts point them to the Me page
+        self._on_request = on_request  # called for every request sent to Google (each one counts against the quota)
 
     def _scrub(self, text: str) -> str:
         """Never let the key reach a log line or an error message."""
@@ -99,6 +104,8 @@ class GeminiProvider:
 
         last_error = "unknown error"
         for attempt in range(1, self._max_retries + 1):
+            if self._on_request:
+                self._on_request()
             try:
                 resp = self._client.models.generate_content(
                     model=self._model, contents=contents, config=config

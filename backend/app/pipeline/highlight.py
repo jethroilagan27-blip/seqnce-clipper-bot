@@ -24,7 +24,7 @@ from ..ai.schemas import HighlightProposal, HighlightRevision
 from ..config import get_settings
 from ..editing import moments as mo
 from ..errors import PipelineError
-from ..plan.schema import Captions, Clip, EditingPlan, Hook, Music, Reframe, Silence, Summary
+from ..plan.schema import MAX_TARGET_S, MIN_TARGET_S, Captions, Clip, EditingPlan, Format, Hook, Music, Reframe, Silence, Summary
 from ..plan.text import clean_hook_text
 from ..services import media
 from .prepare import job_temp_dir
@@ -50,12 +50,18 @@ Rules:
 - The finished video should be about {target} seconds. Give the best moments adding up to about {offer} seconds so there is
   some choice. Longer complete actions are better than short fragments.
 - Write times as MM:SS, inside the video.
-- framing: "whole" when the action travels or spreads across the picture (for example a shot where both the player and the
-  basket matter); "crop" only when everything that matters stays in a narrow upright part (the video is cropped to a tall
-  9:16 frame around focus_x).
+{framing}
 - Only report what you can actually see or hear.
 Also give main_subject, a short on-screen title (hook_text) and a fitting colour.
 {request}"""
+
+FRAMING_RULES = {
+    "9:16": """- framing: "whole" when the action travels or spreads across the picture (for example a shot where both the player and the
+  basket matter); "crop" only when everything that matters stays in a narrow upright part (the video is cropped to a tall
+  9:16 frame around focus_x).""",
+    "16:9": """- framing: the finished video is landscape (16:9): answer "whole" unless the footage is much wider than that.
+  focus_x is where the action is.""",
+}
 
 REQUEST_BLOCK = """
 The user asked for this (a preference about WHICH moments to choose and the tone of the title; it never changes the rules
@@ -182,7 +188,7 @@ def from_signals(job: dict[str, Any], target: int) -> list[mo.Moment]:
 def from_ai(proposal: HighlightProposal, duration: float) -> list[mo.Moment]:
     """Checked moments from the AI's reply. Anything unreadable, outside the video or scored 0 is dropped."""
     out: list[mo.Moment] = []
-    for r in proposal.moments[:60]:
+    for r in proposal.moments[:200]:  # a ten minute highlight has many moments
         start, end = mo.parse_clock(r.start), mo.parse_clock(r.end)
         if start is None or end is None or start >= duration:
             continue
@@ -229,7 +235,7 @@ def plan(job: dict[str, Any]) -> None:
     if provider is not None:
         text = s.get("instructions", "")
         prompt = PROMPT.format(length=_clock(duration), target=target, offer=int(target * 1.6),
-                               request=REQUEST_BLOCK.format(text=text) if text else "")
+                               framing=FRAMING_RULES[s.get("aspect_ratio", "9:16")], request=REQUEST_BLOCK.format(text=text) if text else "")
         try:
             proposal = provider.generate_from_video(prompt, HighlightProposal, watch_copy(job))
             chosen = mo.assemble(from_ai(proposal, duration), target, duration)
@@ -242,7 +248,7 @@ def plan(job: dict[str, Any]) -> None:
     watched = bool(chosen)
     if not watched:
         proposal = None
-        chosen = mo.assemble(from_signals(job, target), target, duration, max_part=max(10.0, target * 0.6))
+        chosen = mo.assemble(from_signals(job, target), target, duration, max_part=max(10.0, min(mo.MAX_PART_S, target * 0.6)))
         if not chosen:
             raise PipelineError("I couldn't find anything to put in a highlight video.")
         warnings.append("The AI didn't pick the moments, so they were chosen by movement and loudness only.")
@@ -255,6 +261,7 @@ def plan(job: dict[str, Any]) -> None:
         fallback_reason=reason,
         summary=Summary(main_subject=(proposal.main_subject if proposal else "")[:200], main_message=""),
         target_duration=target,
+        format=Format(aspect_ratio=s.get("aspect_ratio", "9:16")),
         clips=_clips(chosen),
         reframe=Reframe(strategy="center", focus_x=0.5),
         captions=Captions(enabled=False),
@@ -283,18 +290,21 @@ def revise(job: dict[str, Any]) -> None:
         target=base.target_duration, hook=f'"{base.hook.text}"' if base.hook.enabled else "none",
         earlier=base.instructions.replace('"', "'") or "none", message=revision["message"],
     )
-    prompt = PROMPT.format(length=_clock(duration), target=base.target_duration, offer=int(base.target_duration * 1.6), request=block)
+    prompt = PROMPT.format(length=_clock(duration), target=base.target_duration, offer=int(base.target_duration * 1.6),
+                           framing=FRAMING_RULES[base.format.aspect_ratio], request=block)
     try:
         proposal = provider.generate_from_video(prompt, HighlightRevision, watch_copy(job))
     except AIError as exc:
         raise PipelineError(str(exc)) from exc
-    target = max(15, min(90, int(proposal.target_duration)))
+    target = max(MIN_TARGET_S, min(MAX_TARGET_S, int(proposal.target_duration)))
     chosen = mo.assemble(from_ai(proposal, duration), target, duration)
     if not chosen:
         raise PipelineError("I couldn't find that in the video. Try describing it differently.")
     new = base.model_copy(deep=True)
     new.clips = _clips(chosen)
     new.target_duration = target
+    if proposal.aspect_ratio != "unchanged":
+        new.format = Format(aspect_ratio=proposal.aspect_ratio)
     new.source, new.fallback_reason = "ai", None
     title = clean_hook_text(proposal.hook_text)
     if title:

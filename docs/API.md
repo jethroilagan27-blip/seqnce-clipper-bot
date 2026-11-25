@@ -25,7 +25,8 @@ Job ids are 32-char lowercase hex; anything else returns `422`. Responses never 
 - `file` (required) – `.mp4`, ≤ `MAX_UPLOAD_MB`, ≤ `MAX_VIDEO_DURATION_S`, must start with an MP4 `ftyp` box and pass ffprobe.
 - `upload_id` – instead of `file`: a finished upload in pieces (below).
 - `style` – `talking` (default: cut by what is said, with captions) or `highlight` (the best moments, no speech needed). For a highlight the AI **watches the video**: one request with a small 480p copy including sound (sampled at 1–4 frames a second depending on length; over 15 MB it goes through Gemini's file store and is deleted afterwards). It returns complete actions (MM:SS start and end, score, label, `focus_x`, and `framing`: `crop` to 9:16 around the action or `whole` picture over a blurred background). Python gives each moment a little room, joins ones that touch, and picks whole moments up to about `target_duration` (it may run a bit over rather than cut an action short). No captions or pause trimming. A `talking` edit of a video with no sound or no speech becomes a highlight automatically (`settings.style_note` says why). Without an AI, the most active and loudest stretches are used.
-- `target_duration` int 15–90 (default 45), `captions` bool (true), `remove_silence` bool (true), `background_music` bool (false), `music_track` string (optional), `hook` bool (true – big title at the top for the first ~4 s), `instructions` string (optional, free text for the AI editor; whitespace-normalised and capped at 500 chars).
+- `aspect_ratio` – `9:16` (default, upright) or `16:9` (landscape). In landscape, a source narrower than the frame is shown whole over a blurred copy of itself.
+- `target_duration` int 15–600 (default 45; the video is never longer than the footage), `captions` bool (true), `remove_silence` bool (true), `background_music` bool (false), `music_track` string (optional), `hook` bool (true – big title at the top for the first ~4 s), `instructions` string (optional, free text for the AI editor; whitespace-normalised and capped at 500 chars).
 
 `201` → `{ "job_id": "…" }`
 
@@ -40,8 +41,12 @@ Errors: `413` too large/long · `415` not an mp4 · `422` unreadable video / bad
 ## Library (`GET /api/library`)
 The signed-in account's own videos from all three modes (admins too: only their own), newest first. → `{ items: [{ kind: "video" | "photos" | "studio", id, title, status: "ready" | "working", updated_at, duration, thumb, video, download }], keep_days: { video, photos, studio } }`. `thumb` / `video` / `download` are API paths (add the media token). Failed jobs with nothing to watch and projects never rendered are not listed.
 
-## Admin (`GET /api/admin/users`)
-Admins only (everyone else, and servers without accounts, get `404`). → `{ totals: { accounts, new_24h, new_7d }, users: [{ id, email, is_admin, disabled, plan, created_at, videos_stored, videos_24h, chats_24h }] }`, newest first. Read-only; no password hashes or keys.
+## Admin (`/api/admin`)
+Admins only (everyone else, and servers without accounts, get `404`). Responses are `Cache-Control: no-store` and never contain password hashes or keys.
+
+- `GET /api/admin/users` → `{ totals: { accounts, new_24h, new_7d }, plans: { standard: { videos, chats, studio, studio_ai_chat }, pro, max }, users: [{ id, email, is_admin, disabled, plan, created_at, videos_stored, videos_24h, chats_24h, video_limit, chat_limit, limits: { videos, chats }, studio, studio_ai_chat }] }`, newest first. `video_limit` / `chat_limit` are limits set for that account only (`null` = the plan's); `limits` are the ones in force.
+- `PATCH /api/admin/users/{id}` – send only what changes: `plan` (`standard` | `pro` | `max`), `video_limit`, `chat_limit` (0–10000, `null` = the plan's), `studio`, `studio_ai_chat` (`true` | `false`, `null` = the plan's). → the account. `400` for an admin account (it has no limits), `404` unknown, `422` anything else. Admin rights and disabling accounts stay on the command line.
+- `GET /api/admin/stats?days=30&tz=480&user_id=` – per day (1–365; `tz` = minutes ahead of UTC) → `{ days: [{ date, videos, changes, ai, ai_own }], totals, per_user: [{ user_id, videos, changes, ai, ai_own }] }`. `videos` = new videos (all three modes), `changes` = chat and hand edits (going back to a version is not counted), `ai` / `ai_own` = every request sent to Gemini (retries included) on the server's key / the person's own. `user_id` limits `days` and `totals` to one account. Kept 400 days. When the graphs were first added they were filled from the videos still stored; earlier AI requests are unknown.
 
 ## Your own Gemini key (`/api/account/ai-key`)
 A key the account saved itself always comes first. Without one, `SHARE_SERVER_AI_KEY=true` gives every account the server's key (`mode: "server"`; `system: true` means removing a personal key falls back to it). Otherwise, with accounts on, the AI runs on the key of the account that asked (admins fall back to the server's `GEMINI_API_KEY`; everyone else without a key gets basic cuts and a note pointing to Settings). `GET` → `{ mode: "own" | "server", has_key, hint }` (`hint` is `…` + the last 4 characters, the only part ever shown; `/api/auth/me` carries the same as `user.ai`). `PUT { key }` checks the key with Google (`400` if it isn't valid, `422` if it doesn't look like a key, `429` after 10 tries in 15 minutes), then stores it encrypted. `DELETE` removes it. Without accounts (your own computer) the key in `.env` is used and `PUT` / `DELETE` answer `404`. No route ever returns the key; responses are `Cache-Control: no-store`.
@@ -67,7 +72,7 @@ Available once transcription finished (`409` before). Returns
 
 ## GET /api/jobs/{id}/result
 `200` `{ job_id, original, rendered, plan, preview_url, download_url }` · `409` not ready / failed · `404`.
-`rendered` is the ffprobe result of the final file: always 1080×1920, H.264/AAC, 30 fps.
+`rendered` is the ffprobe result of the final file: 1080×1920 (`9:16`) or 1920×1080 (`16:9`), H.264/AAC, 30 fps.
 
 ## Versions and revisions
 Every finished render is a numbered **version** (v1 = the first edit). A revision creates the next version; the previous ones stay playable until the job is purged (`RETENTION_DAYS`).
@@ -75,7 +80,7 @@ Every finished render is a numbered **version** (v1 = the first edit). A revisio
 ### POST /api/jobs/{id}/revisions
 JSON body, exactly one of:
 - `{"message": "cut the intro and make the hook a question"}` – **chat**. The AI re-plans using the saved transcript (1 Gemini call, 2 in the worst case), Python validates the result like a first plan, then the video is re-rendered. If the AI decides nothing needs to change, the new version reuses the same video.
-- `{"edit": {"hook_enabled"?, "hook_text"?, "hook_color"?, "captions_enabled"?, "remove_clips"?: ["c2"]}}` – **hand edit**, no AI. Hook text is cleaned (≤ 8 words, no emoji); at least one clip must remain.
+- `{"edit": {"aspect_ratio"?: "9:16" | "16:9", "hook_enabled"?, "hook_text"?, "hook_color"?, "captions_enabled"?, "remove_clips"?: ["c2"]}}` – **hand edit**, no AI. Hook text is cleaned (≤ 8 words, no emoji); at least one clip must remain.
 - `{"restore_version": 1}` – **go back**. Instant: the new version points at the old version's video (no render).
 
 `202 {"version": N}` (the number the new version will get) · `409` job not finished / another change running · `422` invalid or no-op request · `404` unknown job or version.
@@ -105,7 +110,7 @@ A hand edit may carry `caption_fixes`: the **complete** list of `{ start, end, t
 
 ### Hand edits can now replace the whole clip list
 `POST /api/jobs/{id}/revisions` with `{"edit": {"clips": [{"start": 12.3, "end": 20.0, "purpose": "main_content", "reason": ""}], "hook_duration_s": 3}}`.
-- `clips` is the **complete** new list in source-video seconds (not combinable with `remove_clips`). Positions are kept exactly as sent (no snapping to sentences); the server clamps to the video, sorts, merges overlapping/touching clips, and rejects clips shorter than 1 s, more than 30 clips, or more than 180 s in total (`422` with a readable message).
+- `clips` is the **complete** new list in source-video seconds (not combinable with `remove_clips`). Positions are kept exactly as sent (no snapping to sentences); the server clamps to the video, sorts, merges overlapping/touching clips, and rejects clips shorter than 1 s, more than 120 clips, or more than 900 s in total (`422` with a readable message).
 - At render time each clip's edges still land on the first/last spoken word inside it (plus a tiny pad), so a trim that falls in silence moves to the nearest word.
 - `hook_duration_s` (1–10): how long the hook title stays on screen.
 
@@ -113,6 +118,7 @@ A hand edit may carry `caption_fixes`: the **complete** list of `{ start, end, t
 Body (optional): `{"version": 2, "edit": { …same shape as a hand edit… }}`. Saves nothing. Returns what the edit looks like, computed with **the same code the renderer uses**:
 ```json
 { "total": 14.02,
+  "format": {"aspect_ratio": "9:16", "width": 1080, "height": 1920},
   "cuts":  [{"start": 0.0, "end": 1.7, "out_start": 0.0}],        // source ranges that are played, in order
   "pages": [{"start": 0.0, "end": 1.6, "text": "Welcome to"}],   // caption pages, output time
   "captions_enabled": true,
@@ -157,7 +163,8 @@ Off by default: with it off every request is served as a built-in local admin wi
 - **Videos** (`DAILY_VIDEO_LIMIT`, default 3): spent when an upload is accepted. **Chat messages** (`DAILY_CHAT_LIMIT`, default 20): spent by `POST /revisions` with `{message}` (the AI call). Hand edits, restoring a version, the live preview and thumbnails cost nothing.
 - Over the limit → `429` with a readable message ("…More free up in about 3 hours."). The check-and-spend is one database transaction, so parallel requests can't slip past it.
 - A user may have `MAX_ACTIVE_JOBS_PER_USER` (default 1) videos queued/processing at once → `409`.
-- Admins have no limits; per-user overrides: `python -m app.admin set-limits EMAIL --videos 10 --chats default`.
+- Plans: **standard** uses the two server defaults above, **pro** allows 15 videos and 100 chat messages, **max** 50 and 300 (`PLAN_LIMITS` in `app/features.py`). A limit set for one account comes first.
+- Admins have no limits; per-account limits: the admin page, or `python -m app.admin set-limits EMAIL --videos 10 --chats default`.
 
 ### Upload gate
 `POST /api/videos/upload` is checked **before its body is read**: without a valid session it answers `401`, and a declared size over `MAX_UPLOAD_MB` answers `413`, so a stranger can't make the server spool a huge file just to be refused.

@@ -16,6 +16,7 @@ import {
 } from "@/lib/api";
 import TextEditor from "@/components/overlay/TextEditor";
 import type { TextOverlay } from "@/lib/overlays";
+import { SHAPES, ratioOf, type AspectRatio } from "@/lib/shape";
 import { clipsEqual, formatTime, toggleRange, type DraftClip, type Range } from "@/lib/timeline";
 import { ChangeChips } from "./RevisionPanel";
 import LivePreview, { type PreviewHandle } from "./LivePreview";
@@ -24,6 +25,7 @@ import PartsPanel from "./PartsPanel";
 import TranscriptEditor from "./TranscriptEditor";
 
 type Draft = {
+  shape: AspectRatio;
   clips: DraftClip[];
   hookEnabled: boolean;
   hookText: string;
@@ -42,6 +44,7 @@ const samePos = (a: Pos | null, b: Pos | null) => (!a && !b) || (!!a && !!b && M
 function draftFrom(plan: Plan): Draft {
   const hook = plan.hook ?? { enabled: false, text: "", color: "yellow", duration_s: 4 };
   return {
+    shape: plan.format?.aspect_ratio ?? "9:16",
     clips: plan.clips.map((c) => ({ start: c.start, end: c.end, purpose: c.purpose, reason: c.reason })),
     hookEnabled: hook.enabled,
     hookText: hook.text,
@@ -60,6 +63,7 @@ function editFrom(plan: Plan, d: Draft): ManualEdit {
   const base = draftFrom(plan);
   const edit: ManualEdit = {};
   if (!clipsEqual(d.clips, base.clips)) edit.clips = d.clips;
+  if (d.shape !== base.shape) edit.aspect_ratio = d.shape;
   if (d.hookEnabled !== base.hookEnabled) edit.hook_enabled = d.hookEnabled;
   if (d.hookEnabled && d.hookText.trim() && d.hookText.trim() !== base.hookText) edit.hook_text = d.hookText.trim();
   if (d.hookColor !== base.hookColor) edit.hook_color = d.hookColor;
@@ -199,6 +203,7 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
 
   const changedAreas = [
     edit.clips && "parts",
+    edit.aspect_ratio && "shape",
     (edit.hook_enabled !== undefined ||
       edit.hook_text !== undefined ||
       edit.hook_color !== undefined ||
@@ -214,10 +219,12 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
   const canApply = dirty && !locked && !specError && !hookInvalid;
   const finalSrc = shown.preview_url ? mediaUrl(shown.preview_url) : null;
   const kept = draft.clips.reduce((a, c) => a + (c.end - c.start), 0);
+  const finalRatio = ratioOf(plan.format?.aspect_ratio); // the shape this version was rendered in
+  const wide = draft.shape === "16:9";
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
+      <div className={`grid gap-6 ${wide ? "lg:grid-cols-[minmax(0,560px)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]"}`}>
         <div className="space-y-4">
           {tabs}
           <div className="flex gap-1.5" role="tablist" aria-label="What to show">
@@ -239,7 +246,7 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
           <div className={mode === "final" ? "" : "hidden"}>
             <div
               className="relative mx-auto overflow-hidden rounded-2xl border border-white/10 bg-black"
-              style={{ aspectRatio: "9 / 16", width: "min(100%, calc(70vh * 9 / 16))" }}
+              style={{ aspectRatio: finalRatio, width: `min(100%, calc(70vh * ${finalRatio}))` }}
             >
               {finalSrc ? (
                 <video
@@ -300,7 +307,7 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="font-medium">
-              Edit your short <span className="text-xs font-normal text-white/40">version {shown.version}</span>
+              Edit your video <span className="text-xs font-normal text-white/40">version {shown.version}</span>
             </h2>
             <p className="text-xs text-white/50">
               {draft.clips.length} part{draft.clips.length === 1 ? "" : "s"} · {formatTime(kept).replace(/\.\d$/, "")} taken from
@@ -332,7 +339,7 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
           onSeek={seek}
         />
         <p className="-mt-2 text-xs text-white/40">
-          Bright parts of your video are in the short; dimmed parts are cut out. Numbers match the list below.
+          Bright parts of your footage are in the new video; dimmed parts are cut out. Numbers match the list below.
         </p>
 
         {specError && (
@@ -383,7 +390,7 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
         {tab === "transcript" && (
           <div className="space-y-2">
             <p className="text-sm text-white/60">
-              Everything that was said. Highlighted sentences are in your short.
+              Everything that was said. Highlighted sentences are in your video.
               {editable && " Tap a sentence to cut it out or add it back. Tap ✎ to correct a word or a name in the captions, then press Apply & render."}
             </p>
             <TranscriptEditor
@@ -401,6 +408,25 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
 
         {tab === "title" && (
           <div className="space-y-4 text-sm">
+            <div className="space-y-2 border-b border-white/10 pb-4">
+              <p className="font-medium">Shape</p>
+              <div role="radiogroup" aria-label="Shape of the video" className="flex flex-wrap gap-2">
+                {SHAPES.map((s) => (
+                  <button
+                    key={s.value}
+                    role="radio"
+                    aria-checked={draft.shape === s.value}
+                    disabled={locked}
+                    onClick={() => change({ shape: s.value })}
+                    className={`rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40 ${
+                      draft.shape === s.value ? "border-violet-400 bg-violet-500/15 font-semibold" : "border-white/15 hover:bg-white/5"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="space-y-2">
               <label className="flex items-center justify-between gap-3">
                 <span>
