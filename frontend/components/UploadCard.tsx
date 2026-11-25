@@ -17,6 +17,8 @@ type Props = {
   onCancel: () => void;
   /** Files already chosen on the start screen (phone: "+ New video"). Read once, when the card appears. */
   initialItems?: Picked[];
+  /** Which kind of edit is selected when the card appears (the start screen's "Highlight video"). */
+  initialStyle?: "talking" | "highlight";
 };
 
 const MAX_BATCH = 100;
@@ -77,7 +79,7 @@ function Toggle(props: {
   );
 }
 
-export default function UploadCard({ busy, uploadProgress, error, blockedReason, onStart, onStartBatch, onCancel, initialItems }: Props) {
+export default function UploadCard({ busy, uploadProgress, error, blockedReason, onStart, onStartBatch, onCancel, initialItems, initialStyle = "talking" }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
   const [first] = useState(() => (initialItems ? screen([], initialItems) : null));
@@ -92,7 +94,9 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
     background_music: false,
     hook: true,
     instructions: "",
+    style: initialStyle,
   });
+  const highlight = settings.style === "highlight";
 
   const wantsMusic = settings.background_music;
   useEffect(() => {
@@ -233,6 +237,32 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
       )}
 
       <div className="space-y-3">
+        <div>
+          <div role="group" aria-label="Kind of video" className="grid grid-cols-2 gap-1 rounded-xl bg-white/5 p-1">
+            {(
+              [
+                ["talking", "Talking video"],
+                ["highlight", "Highlights"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={settings.style === key}
+                disabled={busy}
+                onClick={() => setSettings({ ...settings, style: key })}
+                className={`rounded-lg px-3 py-2.5 text-sm ${settings.style === key ? "bg-violet-600 font-semibold text-white" : "text-white/60 hover:text-white"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-white/50">
+            {highlight
+              ? "Picks the best moments by what happens on screen and how loud it gets. No talking needed (sports, events, trips, games)."
+              : "Cuts by what is said, with captions. A video without speech is made into highlights instead."}
+          </p>
+        </div>
         <div className="rounded-lg border border-white/10 px-4 py-3">
           <div className="flex items-baseline justify-between">
             <span className="text-sm font-medium">Target length</span>
@@ -268,7 +298,7 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
             disabled={busy}
             value={settings.instructions}
             onChange={(e) => setSettings({ ...settings, instructions: e.target.value })}
-            placeholder="e.g. Focus on the pricing tips, skip the intro story, make the hook a question."
+            placeholder={highlight ? "e.g. The goals and the celebrations. Skip the warm-up." : "e.g. Focus on the pricing tips, skip the intro story, make the hook a question."}
             className="mt-2 w-full resize-none rounded-md border border-white/10 bg-field px-3 py-2 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none"
           />
         </div>
@@ -279,23 +309,27 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
           disabled={busy}
           onChange={(v) => setSettings({ ...settings, hook: v })}
         />
-        <Toggle
-          label="Captions"
-          hint="Burn readable subtitles into the video"
-          checked={settings.captions}
-          disabled={busy}
-          onChange={(v) => setSettings({ ...settings, captions: v })}
-        />
-        <Toggle
-          label="Trim long pauses"
-          hint="Shorten dead air but keep natural pacing"
-          checked={settings.remove_silence}
-          disabled={busy}
-          onChange={(v) => setSettings({ ...settings, remove_silence: v })}
-        />
+        {!highlight && (
+          <>
+            <Toggle
+              label="Captions"
+              hint="Burn readable subtitles into the video"
+              checked={settings.captions}
+              disabled={busy}
+              onChange={(v) => setSettings({ ...settings, captions: v })}
+            />
+            <Toggle
+              label="Trim long pauses"
+              hint="Shorten dead air but keep natural pacing"
+              checked={settings.remove_silence}
+              disabled={busy}
+              onChange={(v) => setSettings({ ...settings, remove_silence: v })}
+            />
+          </>
+        )}
         <Toggle
           label="Background music"
-          hint="Mixed quietly under your voice"
+          hint={highlight ? "Played over the video's own sound" : "Mixed quietly under your voice"}
           checked={settings.background_music}
           disabled={busy}
           onChange={(v) => setSettings({ ...settings, background_music: v })}

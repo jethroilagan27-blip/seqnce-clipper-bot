@@ -34,7 +34,7 @@ def build_spec(plan: EditingPlan, transcript: dict[str, Any], meta: dict[str, An
     hook = plan.hook
     return {
         "total": round(total, 3),
-        "cuts": [{"start": c.start, "end": c.end, "out_start": c.out_start} for c in cuts],
+        "cuts": [{"start": c.start, "end": c.end, "out_start": c.out_start, "focus_x": c.focus_x} for c in cuts],
         "pages": pages,
         "captions_enabled": plan.captions.enabled,
         "captions_pos": _pos(plan.captions.x, plan.captions.y),

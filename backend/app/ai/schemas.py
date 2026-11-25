@@ -48,6 +48,32 @@ class RevisionProposal(BaseModel):
     )
 
 
+class RankedMoment(BaseModel):
+    """The AI's opinion of one candidate moment of a highlight video. Every field is required, so none is skipped."""
+
+    id: int = Field(description="The moment's number, exactly as labelled")
+    score: int = Field(description="0 = boring or unusable, 10 = a must-have highlight")
+    label: str = Field(description="What happens, in at most 6 words")
+    focus_x: float = Field(description="Where the action is horizontally: 0 = left edge, 0.5 = middle, 1 = right edge")
+
+
+class HighlightProposal(BaseModel):
+    """What we ask the AI for when making a highlight video."""
+
+    main_subject: str = Field(description="What the footage is, one short phrase")
+    moments: list[RankedMoment] = Field(description="One entry for EVERY moment shown")
+    hook_text: str = Field(description="A punchy on-screen title of at most 7 words, true to what is shown")
+    hook_color: Literal["yellow", "white", "red", "cyan", "green", "pink", "orange"]
+
+
+class HighlightRevision(HighlightProposal):
+    """The same, when the user asks to change an existing highlight video."""
+
+    reply: str = Field(description="One or two friendly sentences telling the user what you changed (or why you could not)")
+    target_duration: int = Field(description="Wanted total length in seconds (15-90). Keep the current value unless asked for another")
+    hook_enabled: bool = Field(description="Whether the title at the top is shown")
+
+
 class VisualMoment(BaseModel):
     time_s: float
     description: str

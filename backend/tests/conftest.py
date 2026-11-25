@@ -82,6 +82,7 @@ def client(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.M
     if not live:
         monkeypatch.setattr("app.pipeline.visual.get_provider", lambda *a, **k: None)
         monkeypatch.setattr("app.pipeline.planner.get_provider", lambda *a, **k: None)
+        monkeypatch.setattr("app.pipeline.highlight.get_provider", lambda *a, **k: None)
 
     from app.main import create_app
 

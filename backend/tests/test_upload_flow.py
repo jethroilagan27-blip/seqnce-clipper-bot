@@ -66,13 +66,15 @@ def test_upload_and_prepare(client: TestClient, sample_video: Path):
     assert ranged.status_code == 206 and len(ranged.content) == 100  # seeking works
 
 
-def test_video_without_audio_fails_with_clear_message(client: TestClient, silent_video: Path):
+def test_video_without_audio_becomes_a_highlight_instead_of_failing(client: TestClient, silent_video: Path):
     job_id = _upload(client, silent_video).json()["job_id"]
     job = _wait_done(client, job_id)
-    assert job["status"] == "failed"
+    assert job["status"] == "completed", job["error"]
     assert job["original"]["has_audio"] is False
-    assert "no audio" in job["error"].lower()
-    assert "Traceback" not in job["error"]
+    assert job["settings"]["style"] == "highlight" and "no sound" in job["settings"]["style_note"]
+    result = client.get(f"/api/jobs/{job_id}/result").json()
+    assert result["rendered"]["has_audio"] is True  # a silent sound track, so every player is happy
+    assert any("no sound" in w for w in result["plan"]["warnings"])
 
 
 def test_rejects_non_mp4_extension(client: TestClient, sample_video: Path):

@@ -82,7 +82,7 @@ function Studio({ account }: { account: AccountInfo }) {
   const [batchRows, setBatchRows] = useState<BatchRow[] | null>(null); // many videos edited one after another
   const [batchRunning, setBatchRunning] = useState(false);
   const batchRef = useRef<Batch | null>(null);
-  const [phonePick, setPhonePick] = useState<{ items: Picked[]; key: number } | null>(null); // chosen with "+ New video"
+  const [phonePick, setPhonePick] = useState<{ items: Picked[]; style: "talking" | "highlight"; key: number } | null>(null); // chosen on the start screen
   const busyRef = useRef(false); // something is being sent from this page: don't throw it away
 
   // Resume a job (or the list of a batch) after a page refresh.
@@ -250,7 +250,7 @@ function Studio({ account }: { account: AccountInfo }) {
     <Shell user={account.user} onSignOut={account.user ? account.signOut : undefined} wide={view === "result"} section="video">
       {view === "upload" && !phonePick && (
         <div className="sm:hidden">
-          <HomeLauncher studio={hasStudio(account.user)} blockedReason={blocked} error={error} onPick={(items) => setPhonePick({ items, key: Date.now() })} />
+          <HomeLauncher studio={hasStudio(account.user)} blockedReason={blocked} error={error} onPick={(items, style) => setPhonePick({ items, style, key: Date.now() })} />
         </div>
       )}
 
@@ -265,6 +265,7 @@ function Studio({ account }: { account: AccountInfo }) {
           <UploadCard
             key={phonePick?.key ?? 0}
             initialItems={phonePick?.items}
+            initialStyle={phonePick?.style}
             busy={uploadProgress !== null}
             uploadProgress={uploadProgress}
             error={error}

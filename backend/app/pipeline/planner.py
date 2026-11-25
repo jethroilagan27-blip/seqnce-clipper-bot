@@ -17,6 +17,7 @@ from ..ai.schemas import PlanProposal
 from ..plan.schema import Captions, EditingPlan, Hook, Music, Reframe, Silence, Summary
 from ..plan.text import clean_hook_text
 from ..plan.validate import PlanValidationError, fallback_clips, repair_and_validate
+from . import highlight
 from .transcribe import load_transcript
 
 log = logging.getLogger(__name__)
@@ -89,6 +90,9 @@ def build_plan(job: dict[str, Any], clips, warnings, source, reason, proposal: P
 
 
 def run(job: dict[str, Any]) -> None:
+    if highlight.is_highlight(job):
+        highlight.plan(job)
+        return
     job_id = job["id"]
     meta = job["metadata_json"]
     duration = float(meta["duration"])

@@ -28,6 +28,9 @@ rem    Set it to false to go back to invite-only (invite codes: python -m app.ad
 start "Seqnce backend (public)" cmd /k "set AUTH_ENABLED=true&& set OPEN_SIGNUP=true&& set SHARE_SERVER_AI_KEY=true&&set CORS_ORIGINS=%PUBLIC_APP%&& set PROXY_REQUEST_LIMIT_MB=100&& set MAX_UPLOAD_MB=1500&& cd backend&& ..\tools\uv\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8000"
 
 rem 2) website: built for the public address, then served (it learns the upload limits from the backend)
+rem    The dev server leaves generated type files behind; ones naming a page that has since been removed stop the build.
+rem    They are made again whenever needed.
+if exist "frontend\.next\dev\types" rmdir /s /q "frontend\.next\dev\types"
 start "Seqnce website (public)" cmd /k "cd frontend&& set NEXT_PUBLIC_API_URL=%PUBLIC_API%&& npm run build&& npm run start -- -p 3000"
 
 rem 3) the tunnel that makes both reachable from the internet (the token is read from a git-ignored file)

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { type Changes, type Job, type Version } from "@/lib/api";
 
+const HIGHLIGHT_SUGGESTIONS = ["Make it shorter", "More action", "Show different moments", "Make the title more exciting"];
+
 const SUGGESTIONS = [
   "Make it shorter",
   "Make the hook more exciting",
@@ -166,7 +168,7 @@ export default function RevisionPanel({ versions, selected, job, busy, onSend, o
       <div className="space-y-2 border-t border-white/10 px-4 py-3">
         {versions.length <= 1 && !busy && (
           <div className="flex flex-wrap gap-1.5">
-            {SUGGESTIONS.map((s) => (
+            {(job.settings.style === "highlight" ? HIGHLIGHT_SUGGESTIONS : SUGGESTIONS).map((s) => (
               <button
                 key={s}
                 disabled={disabled}
@@ -198,7 +200,7 @@ export default function RevisionPanel({ versions, selected, job, busy, onSend, o
               }
             }}
             aria-label="Tell the editor what to change"
-            placeholder={busy ? "Working on your last request…" : "e.g. Cut the part about pricing, and make the hook a question"}
+            placeholder={busy ? "Working on your last request…" : job.settings.style === "highlight" ? "e.g. More of the jumps, less standing around" : "e.g. Cut the part about pricing, and make the hook a question"}
             className="min-h-11 flex-1 resize-none rounded-lg border border-white/10 bg-field px-3 py-2 text-sm placeholder:text-white/30 focus:border-violet-400 focus:outline-none disabled:opacity-50"
           />
           <button

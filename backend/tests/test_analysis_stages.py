@@ -82,7 +82,7 @@ def test_ai_failure_does_not_kill_job(client: TestClient, sample_video: Path, mo
     assert visual["fallback_reason"] == "quota exceeded"
 
 
-def test_no_speech_fails_clearly(client: TestClient, sample_video: Path, monkeypatch: pytest.MonkeyPatch):
+def test_a_video_nobody_talks_in_becomes_a_highlight(client: TestClient, sample_video: Path, monkeypatch: pytest.MonkeyPatch):
     class Silent:
         def transcribe(self, *a, **k):
             from types import SimpleNamespace
@@ -90,8 +90,9 @@ def test_no_speech_fails_clearly(client: TestClient, sample_video: Path, monkeyp
 
     monkeypatch.setattr("app.pipeline.transcribe._get_model", lambda: Silent())
     job = _wait_done(client, _upload(client, sample_video).json()["job_id"])
-    assert job["status"] == "failed"
-    assert "no speech" in job["error"].lower()
+    assert job["status"] == "completed", job["error"]
+    assert job["settings"]["style"] == "highlight" and "no speech" in job["settings"]["style_note"].lower()
+    assert job["has_output"] is True
 
 
 # ---------- live transcript while Whisper is still working ----------

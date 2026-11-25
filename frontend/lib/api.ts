@@ -23,6 +23,9 @@ export type EditSettings = {
   music_track?: string | null;
   hook: boolean;
   instructions: string;
+  /** "highlight" = the best moments, no talking needed. */
+  style?: "talking" | "highlight";
+  style_note?: string; // why the server switched a video without speech to a highlight
 };
 
 export const MAX_INSTRUCTIONS = 500;
@@ -78,6 +81,7 @@ export type Pos = { x: number; y: number };
 export type Hook = { enabled: boolean; text: string; color: string; duration_s: number; x?: number | null; y?: number | null };
 
 export type Plan = {
+  style?: "talking" | "highlight";
   source: "ai" | "fallback";
   fallback_reason: string | null;
   summary: { main_subject: string; main_message: string };
@@ -135,7 +139,7 @@ export type ManualEdit = {
 /** What the browser needs to preview an edit (computed by the server with the renderer's own code). */
 export type TimelineSpec = {
   total: number;
-  cuts: { start: number; end: number; out_start: number }[];
+  cuts: { start: number; end: number; out_start: number; focus_x?: number | null }[];
   pages: { start: number; end: number; text: string }[];
   captions_enabled: boolean;
   captions_pos: Pos | null;
@@ -477,6 +481,7 @@ function postVideoForm(
     if (settings.background_music && settings.music_track) form.append("music_track", settings.music_track);
     form.append("hook", String(settings.hook));
     form.append("instructions", settings.instructions.trim());
+    form.append("style", settings.style ?? "talking");
 
     xhr.open("POST", `${API_URL}/api/videos/upload`);
     if (authToken) xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);

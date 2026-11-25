@@ -22,6 +22,7 @@ Job ids are 32-char lowercase hex; anything else returns `422`. Responses never 
 `multipart/form-data`:
 - `file` (required) – `.mp4`, ≤ `MAX_UPLOAD_MB`, ≤ `MAX_VIDEO_DURATION_S`, must start with an MP4 `ftyp` box and pass ffprobe.
 - `upload_id` – instead of `file`: a finished upload in pieces (below).
+- `style` – `talking` (default: cut by what is said, with captions) or `highlight` (the best moments, no speech needed: movement and loudness propose candidate moments, one AI call scores three frames of each against `instructions`, Python picks up to `target_duration` and crops each part around its action; no captions or pause trimming). A `talking` edit of a video with no sound or no speech becomes a highlight automatically (`settings.style_note` says why). Without an AI, movement and loudness decide alone.
 - `target_duration` int 15–90 (default 45), `captions` bool (true), `remove_silence` bool (true), `background_music` bool (false), `music_track` string (optional), `hook` bool (true – big title at the top for the first ~4 s), `instructions` string (optional, free text for the AI editor; whitespace-normalised and capped at 500 chars).
 
 `201` → `{ "job_id": "…" }`

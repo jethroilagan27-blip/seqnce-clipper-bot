@@ -17,6 +17,7 @@ from ..ai import AIError, LabeledImage, get_provider, no_key_reason
 from ..ai.schemas import VisualAnalysis
 from ..config import get_settings
 from ..services import frames as frames_svc
+from . import highlight
 from .prepare import job_temp_dir
 from .transcribe import load_transcript
 
@@ -66,6 +67,9 @@ def clean_analysis(raw: VisualAnalysis, duration: float) -> dict[str, Any]:
 
 
 def run(job: dict[str, Any]) -> None:
+    if highlight.is_highlight(job):
+        highlight.analyse(job)  # movement, loudness and candidate moments instead
+        return
     job_id = job["id"]
     cfg = get_settings()
     meta = job["metadata_json"]

@@ -49,27 +49,35 @@ def build_filtergraph(
     music: bool,
     music_volume: float,
     total: float,
+    crops: Sequence[CropBox] | None = None,
+    has_audio: bool = True,
 ) -> str:
+    """`crops` (one per cut, all the same size) crops each piece around its own action instead of the single `crop`.
+    `has_audio=False` (a silent source) puts silence under every piece, so the output still has a sound track."""
     if not cuts:
         raise ValueError("no cuts")
+    if crops is not None and len(crops) != len(cuts):
+        raise ValueError("one crop per cut")
     parts: list[str] = []
     for i, c in enumerate(cuts):
         d = c.duration
         fade = min(CROSSFADE_S, d / 4)
+        own = f",crop={crops[i].w}:{crops[i].h}:{crops[i].x}:{crops[i].y}" if crops else ""
         parts.append(
-            f"[0:v]trim=start={c.start:.3f}:end={c.end:.3f},setpts=PTS-STARTPTS[v{i}]"
+            f"[0:v]trim=start={c.start:.3f}:end={c.end:.3f},setpts=PTS-STARTPTS{own}[v{i}]"
         )
-        parts.append(
-            f"[0:a]atrim=start={c.start:.3f}:end={c.end:.3f},asetpts=PTS-STARTPTS,"
-            f"afade=t=in:st=0:d={fade:.3f},afade=t=out:st={d - fade:.3f}:d={fade:.3f}[a{i}]"
-        )
+        if has_audio:
+            parts.append(
+                f"[0:a]atrim=start={c.start:.3f}:end={c.end:.3f},asetpts=PTS-STARTPTS,"
+                f"afade=t=in:st=0:d={fade:.3f},afade=t=out:st={d - fade:.3f}:d={fade:.3f}[a{i}]"
+            )
+        else:
+            parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={d:.3f},asetpts=PTS-STARTPTS[a{i}]")
     inputs = "".join(f"[v{i}][a{i}]" for i in range(len(cuts)))
     parts.append(f"{inputs}concat=n={len(cuts)}:v=1:a=1[vcat][acat]")
 
-    video = (
-        f"[vcat]crop={crop.w}:{crop.h}:{crop.x}:{crop.y},"
-        f"scale={OUT_W}:{OUT_H}:flags=lanczos,setsar=1,fps={OUT_FPS}"
-    )
+    whole = "" if crops else f"crop={crop.w}:{crop.h}:{crop.x}:{crop.y},"
+    video = f"[vcat]{whole}scale={OUT_W}:{OUT_H}:flags=lanczos,setsar=1,fps={OUT_FPS}"
     if captions:
         video += f",ass={ASS_NAME}"
     parts.append(video + "[vout]")

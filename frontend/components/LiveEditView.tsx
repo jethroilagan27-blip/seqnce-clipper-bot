@@ -85,7 +85,7 @@ export default function LiveEditView({ job }: { job: Job }) {
 
   if (!analysis) {
     return (
-      <p className="text-center text-sm text-white/40">Getting ready… the first words will show up here as they are recognised.</p>
+      <p className="text-center text-sm text-white/40">{job.settings.style === "highlight" ? "Getting ready… looking through your footage." : "Getting ready… the first words will show up here as they are recognised."}</p>
     );
   }
 
@@ -106,6 +106,10 @@ export default function LiveEditView({ job }: { job: Job }) {
   } else if (hasPlan) {
     title = revealing ? `The AI is picking parts… ${revealed} of ${clips.length}` : `The AI picked ${clips.length} part${clips.length === 1 ? "" : "s"}`;
     sub = `Play the preview now. The final video is still being rendered (${job.progress}%).`;
+  }
+  if (job.settings.style === "highlight" && !hasPlan) {
+    title = job.stage === "planning" ? "The AI is picking the highlights…" : "Finding the moments…";
+    sub = job.settings.style_note || "Looking for movement, loud moments and scene changes, then choosing the best ones.";
   }
 
   return (

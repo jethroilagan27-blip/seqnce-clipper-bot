@@ -66,6 +66,9 @@ const STEPS: { key: string; label: string }[] = [
   { key: "completed", label: "Completed" },
 ];
 
+// A highlight video skips the speech steps; the same server stages mean different things there.
+const HIGHLIGHT_LABEL: Record<string, string> = { transcribing: "Checking the sound", analyzing_visuals: "Finding the moments", planning: "Picking the highlights" };
+
 type Props = { job: Job; onRestart: () => void };
 
 export default function ProcessingView({ job, onRestart }: Props) {
@@ -121,7 +124,7 @@ export default function ProcessingView({ job, onRestart }: Props) {
                 {st === "done" ? "✓" : i + 1}
               </span>
               <span className={st === "todo" ? "text-white/35" : st === "active" ? "font-medium" : "text-white/70"}>
-                {s.label}
+                {(job.settings.style === "highlight" && HIGHLIGHT_LABEL[s.key]) || s.label}
                 {st === "active" && job.status === "queued" && " (waiting in queue)"}
               </span>
             </li>

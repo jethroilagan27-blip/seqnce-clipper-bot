@@ -18,6 +18,7 @@ from ..plan.schema import EditingPlan
 from ..plan.text import clean_hook_text
 from ..plan.validate import PlanValidationError, repair_and_validate
 from .planner import format_transcript
+from . import highlight
 from .transcribe import load_transcript
 
 log = logging.getLogger(__name__)
@@ -91,6 +92,9 @@ def run(job: dict[str, Any]) -> None:
     job_id = job["id"]
     revision = job["revision_json"]
     base = EditingPlan.model_validate(job["plan_json"])
+    if base.style == "highlight":
+        highlight.revise(job)
+        return
     transcript = load_transcript(job)
     segments = transcript["segments"]
     duration = float(job["metadata_json"]["duration"])

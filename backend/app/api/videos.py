@@ -82,6 +82,7 @@ def upload_video(
     music_track: str | None = Form(None),
     hook: bool = Form(True),
     instructions: str = Form(""),
+    style: str = Form("talking"),  # "highlight" = best moments, no speech needed
     user: User = Depends(current_user),
 ) -> UploadResponse:
     cfg = get_settings()
@@ -97,6 +98,7 @@ def upload_video(
             music_track=music_track or None,
             hook=hook,
             instructions=clean_instructions(instructions),
+            style=style,
         )
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="Invalid editing settings") from exc
@@ -265,7 +267,7 @@ def thumbnail(
         return FileResponse(path, media_type="image/jpeg", headers=headers)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".part.jpg")
+    tmp = path.with_name(f"{path.stem}.{uuid.uuid4().hex[:8]}.part.jpg")  # two requests for one frame must not share it
     with _thumb_slots:
         if not path.is_file():  # another request may have made it while we waited
             proc = media.run_tool(
@@ -282,5 +284,10 @@ def thumbnail(
                 tmp.unlink(missing_ok=True)
                 log.warning("job %s: thumbnail at %.1fs failed: %s", job_id, slot / 2, proc.stderr.strip()[:200])
                 raise HTTPException(status_code=404, detail="No frame at that time")
-            tmp.replace(path)
+            try:
+                tmp.replace(path)
+            except OSError:  # Windows: the same frame was just made by another request and is being sent
+                tmp.unlink(missing_ok=True)
+                if not path.is_file():
+                    raise
     return FileResponse(path, media_type="image/jpeg", headers=headers)

@@ -159,10 +159,12 @@ export default function LivePreview({
   const hookOn = hook.enabled && hook.text.trim() !== "" && t < hook.duration_s;
   const hookOpacity = Math.max(0, Math.min(1, t / 0.18, (hook.duration_s - t) / 0.3));
 
-  // Same crop as the render: a 9:16 window centred on the speaker.
+  // Same crop as the render: a 9:16 window centred on the speaker, or (highlights) on each part's own action.
   const { width: sw, height: sh } = spec.source;
   const k = (16 / 9) * (sw / sh); // video width as a multiple of the 9:16 window's width
-  const left = k >= 1 ? -Math.min(Math.max(spec.reframe.focus_x * k - 0.5, 0), k - 1) * 100 : 0;
+  const current = spec.cuts.findLast((c) => c.out_start <= t + 0.001);
+  const focus = current?.focus_x ?? spec.reframe.focus_x;
+  const left = k >= 1 ? -Math.min(Math.max(focus * k - 0.5, 0), k - 1) * 100 : 0;
   const videoStyle: React.CSSProperties =
     k >= 1
       ? { position: "absolute", top: 0, height: "100%", width: `${k * 100}%`, left: `${left}%`, maxWidth: "none" }

@@ -19,6 +19,9 @@ class EditSettings(BaseModel):
     music_track: str | None = Field(default=None, max_length=100)
     hook: bool = True
     instructions: str = Field(default="", max_length=500, description="Free-text request for the AI editor")
+    # "talking" = cut by what is said; "highlight" = the best moments, no speech needed (pipeline/highlight.py)
+    style: Literal["talking", "highlight"] = "talking"
+    style_note: str = ""  # set by us when a video without speech was switched to a highlight
 
 
 HookColorName = Literal["yellow", "white", "red", "cyan", "green", "pink", "orange"]

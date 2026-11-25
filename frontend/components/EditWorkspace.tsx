@@ -99,6 +99,7 @@ type Props = {
 export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, side, onApply, onRestore }: Props) {
   const plan = shown.plan;
   const editable = isCurrent && !busy;
+  const highlight = plan.style === "highlight"; // no words: no transcript or captions
   const previewRef = useRef<PreviewHandle>(null);
 
   const [draft, setDraft] = useState<Draft>(() => draftFrom(plan));
@@ -341,9 +342,9 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
             [
               ["parts", "Parts"],
               ["transcript", "Transcript"],
-              ["title", "Title & captions"],
+              ["title", highlight ? "Title & text" : "Title & captions"],
             ] as const
-          ).map(([key, label]) => (
+          ).filter(([key]) => !(highlight && key === "transcript")).map(([key, label]) => (
             <button
               key={key}
               role="tab"
@@ -455,19 +456,21 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
                 </>
               )}
             </div>
-            <label className="flex items-center justify-between gap-3">
-              <span>
-                <span className="font-medium">Captions</span>
-                <span className="block text-xs text-white/50">Subtitles burned into the video</span>
-              </span>
-              <input
-                type="checkbox"
-                className="h-5 w-5 accent-violet-500"
-                checked={draft.captions}
-                disabled={locked}
-                onChange={(e) => change({ captions: e.target.checked })}
-              />
-            </label>
+            {!highlight && (
+              <label className="flex items-center justify-between gap-3">
+                <span>
+                  <span className="font-medium">Captions</span>
+                  <span className="block text-xs text-white/50">Subtitles burned into the video</span>
+                </span>
+                <input
+                  type="checkbox"
+                  className="h-5 w-5 accent-violet-500"
+                  checked={draft.captions}
+                  disabled={locked}
+                  onChange={(e) => change({ captions: e.target.checked })}
+                />
+              </label>
+            )}
 
             <div className="space-y-2 border-t border-white/10 pt-4">
               <p className="font-medium">Move things around</p>

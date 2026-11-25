@@ -23,6 +23,7 @@ class Cut:
     start: float  # source time (s)
     end: float
     out_start: float = 0.0  # position in the output timeline (filled by build_cuts)
+    focus_x: float | None = None  # this piece's own 9:16 crop position; None = the plan's
 
     @property
     def duration(self) -> float:
@@ -40,7 +41,7 @@ def build_cuts(plan: EditingPlan, words: Sequence[dict[str, Any]], video_duratio
     for clip in plan.clips:
         inside = [w for w in words if w["end"] > clip.start + 0.02 and w["start"] < clip.end - 0.02]
         if not inside:  # no word timing: use the clip as planned
-            cuts.append(Cut(clip.start, min(clip.end, video_duration)))
+            cuts.append(Cut(clip.start, min(clip.end, video_duration), focus_x=clip.focus_x))
             continue
 
         first, last = inside[0], inside[-1]
@@ -65,7 +66,7 @@ def build_cuts(plan: EditingPlan, words: Sequence[dict[str, Any]], video_duratio
 
         for s, e in pieces:
             if e - s >= MIN_PIECE_S:
-                cuts.append(Cut(round(s, 3), round(e, 3)))
+                cuts.append(Cut(round(s, 3), round(e, 3), focus_x=clip.focus_x))
 
     # absolute positions in the output
     offset = 0.0

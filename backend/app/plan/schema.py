@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 from ..editing.overlays import MAX_TEXTS, TextOverlay
 
@@ -22,10 +22,18 @@ class Clip(BaseModel):
     end: float = Field(gt=0)
     purpose: Purpose
     reason: str = ""
+    focus_x: float | None = Field(default=None, ge=0, le=1)  # this clip's own 9:16 crop position (highlights)
 
     @property
     def duration(self) -> float:
         return self.end - self.start
+
+    @model_serializer(mode="wrap")
+    def _only_say_what_is_set(self, handler):
+        data = handler(self)
+        if data.get("focus_x") is None:  # talking videos have one crop for the whole plan: no per-clip field
+            data.pop("focus_x", None)
+        return data
 
 
 class Summary(BaseModel):
@@ -81,6 +89,7 @@ class Music(BaseModel):
 
 class EditingPlan(BaseModel):
     version: Literal[1] = 1
+    style: Literal["talking", "highlight"] = "talking"
     source: Literal["ai", "fallback"] = "ai"
     fallback_reason: str | None = None
     summary: Summary = Field(default_factory=Summary)

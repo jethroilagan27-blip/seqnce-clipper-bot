@@ -85,10 +85,14 @@ def run(job: dict[str, Any]) -> None:
             encoding="utf-8",
         )
 
-    crop = compute_crop(int(meta["width"]), int(meta["height"]), plan.reframe.focus_x)
+    width, height = int(meta["width"]), int(meta["height"])
+    crop = compute_crop(width, height, plan.reframe.focus_x)
+    crops = None
+    if any(c.focus_x is not None for c in cuts):
+        crops = [compute_crop(width, height, plan.reframe.focus_x if c.focus_x is None else c.focus_x) for c in cuts]
     graph = build_filtergraph(
         cuts, crop, captions=captions_on or hook_on or texts_on, music=music is not None,
-        music_volume=plan.music.volume, total=total,
+        music_volume=plan.music.volume, total=total, crops=crops, has_audio=bool(meta.get("has_audio", True)),
     )
     (work / "filter.txt").write_text(graph, encoding="utf-8")
     (work / "cuts.json").write_text(

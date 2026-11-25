@@ -107,14 +107,31 @@ def load_transcript(job: dict[str, Any]) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _save_empty(job_id: str) -> None:
+    """Highlight videos don't use words: an empty transcript keeps every later step and page working."""
+    path = transcript_path(job_id)
+    path.write_text(json.dumps({"language": "", "duration": 0, "model": "", "segments": []}), encoding="utf-8")
+    db.update_job(job_id, transcript_path=str(path))
+
+
+def _switch_to_highlight(job: dict[str, Any], why: str) -> None:
+    """A "talking" edit of a video nobody talks in: make a highlight video instead of failing."""
+    job_id = job["id"]
+    settings = {**job["settings_json"], "style": "highlight", "style_note": f"{why}, so this was edited as a highlight video."}
+    db.update_job(job_id, settings_json=settings)
+    _save_empty(job_id)
+    log.info("job %s: %s: switching to a highlight edit", job_id, why.lower())
+
+
 def run(job: dict[str, Any]) -> None:
     job_id = job["id"]
+    if job["settings_json"].get("style") == "highlight":
+        _save_empty(job_id)
+        return
     audio = job.get("audio_path")
     if not audio or not Path(audio).is_file():
-        raise PipelineError(
-            "This video has no audio track, so there is no speech to transcribe. "
-            "Talking-head editing needs spoken audio."
-        )
+        _switch_to_highlight(job, "This video has no sound")
+        return
 
     cfg = get_settings()
     meta = job.get("metadata_json") or {}
@@ -162,7 +179,8 @@ def run(job: dict[str, Any]) -> None:
                 db.update_job(job_id, progress=pct)
 
     if not segments:
-        raise PipelineError("No speech was detected in this video.")
+        _switch_to_highlight(job, "No speech was found")
+        return
 
     out = {
         "language": info.language,
