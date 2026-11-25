@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 
 from google import genai
 from google.genai import errors as genai_errors
@@ -11,12 +12,14 @@ from google.genai import types
 from pydantic import ValidationError
 
 from ..config import get_settings
-from .base import AIError, LabeledImage, T
+from .base import AIError, LabeledImage, T, VideoInput
 
 log = logging.getLogger(__name__)
 
 _RETRYABLE = {429, 500, 502, 503, 504}
 MAX_OUTPUT_TOKENS = 32768
+INLINE_VIDEO_BYTES = 15 * 1024 * 1024  # a request may carry about 20 MB; bigger videos go through the file store
+UPLOAD_WAIT_S = 5 * 60
 
 
 class GeminiProvider:
@@ -44,12 +47,52 @@ class GeminiProvider:
             contents.append(img.label)
             contents.append(types.Part.from_bytes(data=img.jpeg, mime_type="image/jpeg"))
         contents.append(prompt)
+        return self._ask(contents, response_model, len(images or []))
 
+    def generate_from_video(self, prompt: str, response_model: type[T], video: VideoInput) -> T:
+        """The model watches the video itself. Small ones travel inside the request; bigger ones are uploaded to Google's
+        file store first and deleted again straight afterwards."""
+        sampling = types.VideoMetadata(fps=video.fps)
+        uploaded = None
+        try:
+            if video.path.stat().st_size <= INLINE_VIDEO_BYTES:
+                part = types.Part(inline_data=types.Blob(data=video.path.read_bytes(), mime_type="video/mp4"), video_metadata=sampling)
+            else:
+                uploaded = self._upload(video.path)
+                part = types.Part(file_data=types.FileData(file_uri=uploaded.uri, mime_type="video/mp4"), video_metadata=sampling)
+            resolution = types.MediaResolution.MEDIA_RESOLUTION_LOW if video.low_resolution else None
+            return self._ask([part, prompt], response_model, 0, resolution)
+        finally:
+            if uploaded is not None:
+                try:
+                    self._client.files.delete(name=uploaded.name)
+                except Exception:  # Google deletes it by itself after two days anyway
+                    log.warning("could not delete the uploaded video from Gemini's file store")
+
+    def _upload(self, path: Path):
+        try:
+            file = self._client.files.upload(file=str(path))
+            deadline = time.time() + UPLOAD_WAIT_S
+            while getattr(file.state, "name", str(file.state)) == "PROCESSING" and time.time() < deadline:
+                time.sleep(3)
+                file = self._client.files.get(name=file.name)
+        except genai_errors.APIError as exc:
+            log.warning("gemini upload failed: %s", self._scrub(str(exc)[:200]))
+            raise AIError("The video couldn't be sent to the AI.") from exc
+        except Exception as exc:
+            log.warning("gemini upload failed: %s", self._scrub(f"{type(exc).__name__}: {str(exc)[:200]}"))
+            raise AIError("The video couldn't be sent to the AI.") from exc
+        if getattr(file.state, "name", str(file.state)) != "ACTIVE":
+            raise AIError("The AI service couldn't read the video.")
+        return file
+
+    def _ask(self, contents: list, response_model: type[T], image_count: int, media_resolution=None) -> T:
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=response_model,
             temperature=0.2,
             max_output_tokens=MAX_OUTPUT_TOKENS,  # long scripts need a long answer (and "thinking" models spend tokens before it)
+            media_resolution=media_resolution,
         )
 
         last_error = "unknown error"
@@ -93,7 +136,7 @@ class GeminiProvider:
                 log.info(
                     "gemini usage: model=%s images=%d prompt_tokens=%s output_tokens=%s finish=%s",
                     self._model,
-                    len(images or []),
+                    image_count,
                     usage.prompt_token_count,
                     usage.candidates_token_count,
                     finish_name,

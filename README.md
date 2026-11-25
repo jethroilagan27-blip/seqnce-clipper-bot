@@ -9,7 +9,7 @@ Upload an MP4. Seqnce transcribes it on your computer, asks an AI which parts ar
 ## What it does
 
 - **Auto-edit:** local speech-to-text ([faster-whisper](https://github.com/SYSTRAN/faster-whisper)) → Gemini chooses the best moments → FFmpeg cuts, shortens long pauses, crops to 9:16 around the speaker, burns in captions, and mixes optional music.
-- **Highlight videos:** footage without talking (sports, events, trips, games) becomes a highlight: movement and loud moments propose candidates, the AI scores frames of each against your request, and every part is cropped around its action. A video with no speech is edited this way automatically. The crop is fixed per part (it doesn't follow a moving subject), and the AI judges still frames, so check the result.
+- **Highlight videos:** footage without talking (sports, workouts, events, trips, games) becomes a highlight: the AI watches the whole video, picks complete actions (a shot from the build-up to the result, a whole set) and decides for each whether to crop around it or show the full picture. A video with no speech is edited this way automatically. A small copy of the video is sent to Gemini for this. The crop is fixed per part (it doesn't follow a moving subject) and the AI can misjudge, so check the result.
 - **Hook title:** a big coloured headline at the top for the first few seconds (text and colour chosen by the AI, editable).
 - **Tell it what you want:** optional instructions before editing ("focus on the pricing tips, make the hook a question").
 - **Chat revisions:** "cut the intro", "make it 20 seconds". Each change becomes a numbered **version**, with a diff showing which parts were added, removed or trimmed. Go back to any version instantly.

@@ -67,7 +67,7 @@ const STEPS: { key: string; label: string }[] = [
 ];
 
 // A highlight video skips the speech steps; the same server stages mean different things there.
-const HIGHLIGHT_LABEL: Record<string, string> = { transcribing: "Checking the sound", analyzing_visuals: "Finding the moments", planning: "Picking the highlights" };
+const HIGHLIGHT_LABEL: Record<string, string> = { transcribing: "Checking the sound", analyzing_visuals: "Getting it ready for the AI", planning: "The AI is watching your video" };
 
 type Props = { job: Job; onRestart: () => void };
 

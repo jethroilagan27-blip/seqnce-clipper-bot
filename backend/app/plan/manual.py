@@ -42,8 +42,10 @@ def apply_manual_edit(
         for c in as_dicts:  # a trimmed clip keeps the crop position of the old clip it mostly came from
             overlap = lambda o: min(c["end"], o["end"]) - max(c["start"], o["start"])  # noqa: E731, B023
             source = max(new["clips"], key=overlap, default=None)
-            if source is not None and overlap(source) > 0 and source.get("focus_x") is not None:
-                c["focus_x"] = source["focus_x"]
+            if source is not None and overlap(source) > 0:
+                for key in ("focus_x", "framing"):
+                    if source.get(key) is not None:
+                        c[key] = source[key]
         if not _same_clips(as_dicts, new["clips"]):
             n_old, n_new = len(new["clips"]), len(as_dicts)
             parts.append("edited the clips" + (f" ({n_old} → {n_new})" if n_old != n_new else ""))

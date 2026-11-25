@@ -1,6 +1,7 @@
 """Finding the exciting parts of a video without needing speech. Pure functions on numbers: no files, no AI.
 
-Two signals, measured every quarter second:
+The AI that watches the video gives start and end times; `assemble` turns them into whole, uncut actions. The signals
+below are the fallback for when there is no AI. Measured every quarter second:
 - movement: how much the picture changes between small grey frames;
 - loudness: how loud the sound is (cheers, hits, music drops).
 A sudden jump in the picture that doesn't last is a camera cut, not movement; it is noted and ignored as movement.
@@ -32,6 +33,7 @@ class Moment:
     score: float = 0.0  # final score used to choose (local, or mixed with the AI's opinion)
     label: str = ""
     focus_x: float | None = None  # where the action is, left (0) to right (1)
+    framing: str | None = None  # "crop" around focus_x, or show the "whole" picture
 
     @property
     def duration(self) -> float:
@@ -82,7 +84,7 @@ def normalise(x: np.ndarray) -> np.ndarray:
 
 
 def clip_length(target: float) -> float:
-    return float(min(3.5, max(2.0, target / 10)))
+    return float(min(6.0, max(4.0, target / 8)))  # long enough that an action isn't chopped in the middle
 
 
 def _overlaps(a_start: float, a_end: float, taken: Sequence[Moment], gap: float) -> bool:
@@ -150,16 +152,76 @@ def candidates(motion: np.ndarray, loud: np.ndarray | None, duration: float, cut
     return sorted(chosen, key=lambda c: c.start)
 
 
-def choose(moments: Sequence[Moment], target: float, duration: float) -> list[Moment]:
-    """The best-scoring moments that add up to about `target` seconds, returned in the order they happen."""
+PAD_BEFORE_S = 0.6  # the AI answers in whole seconds: breathe a little before an action...
+PAD_AFTER_S = 1.0  # ...and let its result be seen
+MIN_PART_S = 3.0
+MAX_PART_S = 40.0
+JOIN_GAP_S = 1.5  # parts closer than this are one stretch: cutting there would only look like a glitch
+
+
+def parse_clock(raw: str) -> float | None:
+    """"01:15", "1:15.5", "1:02:03" or plain seconds -> seconds. None if it isn't a time."""
+    parts = str(raw).strip().rstrip("s").split(":")
+    if not 1 <= len(parts) <= 3:
+        return None
+    try:
+        numbers = [float(p) for p in parts]
+    except ValueError:
+        return None
+    if any(n != n or n < 0 or n == float("inf") for n in numbers):
+        return None
+    total = 0.0
+    for n in numbers:
+        total = total * 60 + n
+    return total
+
+
+def _join(a: Moment, b: Moment) -> Moment:
+    """Two stretches that touch become one. It keeps the better one's name; if they need different crops, show it all."""
+    best = a if a.score >= b.score else b
+    apart = a.focus_x is not None and b.focus_x is not None and abs(a.focus_x - b.focus_x) > 0.15
+    return Moment(
+        min(a.start, b.start), max(a.end, b.end), max(a.local, b.local), max(a.motion, b.motion), max(a.loud, b.loud),
+        score=best.score, label=best.label, focus_x=best.focus_x, framing="whole" if apart or "whole" in (a.framing, b.framing) else best.framing,
+    )
+
+
+def whole_actions(found: Sequence[Moment], duration: float, max_part: float = MAX_PART_S) -> list[Moment]:
+    """Give each moment room to be seen completely, then join the ones that touch or overlap. In time order."""
+    padded: list[Moment] = []
+    for m in found:
+        if m.end <= m.start or m.start >= duration:
+            continue
+        start, end = max(0.0, m.start - PAD_BEFORE_S), min(duration, m.end + PAD_AFTER_S)
+        if end - start < MIN_PART_S:
+            extra = (MIN_PART_S - (end - start)) / 2
+            start, end = max(0.0, start - extra), min(duration, end + extra)
+            if end - start < MIN_PART_S:  # at an edge of the video: take the room from the other side
+                start, end = max(0.0, end - MIN_PART_S), min(duration, start + MIN_PART_S)
+        if end - start > max_part:
+            start = end - max_part  # the result of an action is at its end
+        padded.append(Moment(**{**m.to_dict(), "start": round(start, 2), "end": round(end, 2)}))
+    joined: list[Moment] = []
+    for m in sorted(padded, key=lambda c: c.start):
+        if joined and m.start - joined[-1].end < JOIN_GAP_S and max(joined[-1].end, m.end) - joined[-1].start <= max_part:
+            joined[-1] = _join(joined[-1], m)
+        elif joined and m.start < joined[-1].end:  # too long to join: continue exactly where the last one stops
+            if m.end - joined[-1].end >= MIN_PART_S:
+                joined.append(Moment(**{**m.to_dict(), "start": joined[-1].end}))
+        else:
+            joined.append(m)
+    return joined
+
+
+def assemble(found: Sequence[Moment], target: float, duration: float, max_part: float = MAX_PART_S) -> list[Moment]:
+    """The best whole moments adding up to about `target` seconds, in the order they happen. A moment is never cut short to
+    fit: the video may run a bit over (or under) the wanted length instead."""
     picked: list[Moment] = []
     total = 0.0
-    for m in sorted(moments, key=lambda c: (-c.score, c.start)):
-        if total >= target - 0.75:
+    for m in sorted(whole_actions(found, duration, max_part), key=lambda c: (-c.score, c.start)):
+        if total >= target * 0.9:
             break
-        if total + m.duration > target * 1.15 and picked:
-            continue
-        if _overlaps(m.start, m.end, picked, 0.0):
+        if picked and total + m.duration > target * 1.3:
             continue
         picked.append(m)
         total += m.duration

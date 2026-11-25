@@ -41,6 +41,18 @@ def compute_crop(src_w: int, src_h: int, focus_x: float) -> CropBox:
     return CropBox(w, h, 0, y - y % 2)
 
 
+def _whole_picture(trim: str, i: int) -> str:
+    """The full picture, fitted inside the 9:16 frame, over a dimmed and blurred copy of itself that fills the rest.
+    (The background is blurred small and then enlarged: far cheaper than blurring at full size.)"""
+    return (
+        f"{trim},split=2[wb{i}][wf{i}];"
+        f"[wb{i}]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=8:2,eq=brightness=-0.18,"
+        f"scale={OUT_W}:{OUT_H}[bg{i}];"
+        f"[wf{i}]scale={OUT_W}:{OUT_H}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos[fg{i}];"
+        f"[bg{i}][fg{i}]overlay=(W-w)/2:(H-h)/2,setsar=1[v{i}]"
+    )
+
+
 def build_filtergraph(
     cuts: Sequence[Cut],
     crop: CropBox,
@@ -59,13 +71,20 @@ def build_filtergraph(
     if crops is not None and len(crops) != len(cuts):
         raise ValueError("one crop per cut")
     parts: list[str] = []
+    # Some pieces show the whole picture: then every piece is brought to the output size before they are joined.
+    mixed = any(c.framing == "whole" for c in cuts)
     for i, c in enumerate(cuts):
         d = c.duration
         fade = min(CROSSFADE_S, d / 4)
+        trim = f"[0:v]trim=start={c.start:.3f}:end={c.end:.3f},setpts=PTS-STARTPTS"
         own = f",crop={crops[i].w}:{crops[i].h}:{crops[i].x}:{crops[i].y}" if crops else ""
-        parts.append(
-            f"[0:v]trim=start={c.start:.3f}:end={c.end:.3f},setpts=PTS-STARTPTS{own}[v{i}]"
-        )
+        if mixed and c.framing == "whole":
+            parts.append(_whole_picture(trim, i))
+        elif mixed:
+            box = crops[i] if crops else crop
+            parts.append(f"{trim},crop={box.w}:{box.h}:{box.x}:{box.y},scale={OUT_W}:{OUT_H}:flags=lanczos,setsar=1[v{i}]")
+        else:
+            parts.append(f"{trim}{own}[v{i}]")
         if has_audio:
             parts.append(
                 f"[0:a]atrim=start={c.start:.3f}:end={c.end:.3f},asetpts=PTS-STARTPTS,"
@@ -76,8 +95,11 @@ def build_filtergraph(
     inputs = "".join(f"[v{i}][a{i}]" for i in range(len(cuts)))
     parts.append(f"{inputs}concat=n={len(cuts)}:v=1:a=1[vcat][acat]")
 
-    whole = "" if crops else f"crop={crop.w}:{crop.h}:{crop.x}:{crop.y},"
-    video = f"[vcat]{whole}scale={OUT_W}:{OUT_H}:flags=lanczos,setsar=1,fps={OUT_FPS}"
+    if mixed:  # already cropped / fitted piece by piece
+        video = f"[vcat]fps={OUT_FPS}"
+    else:
+        one_crop = "" if crops else f"crop={crop.w}:{crop.h}:{crop.x}:{crop.y},"
+        video = f"[vcat]{one_crop}scale={OUT_W}:{OUT_H}:flags=lanczos,setsar=1,fps={OUT_FPS}"
     if captions:
         video += f",ass={ASS_NAME}"
     parts.append(video + "[vout]")

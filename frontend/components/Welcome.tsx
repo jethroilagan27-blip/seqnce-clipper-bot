@@ -8,7 +8,7 @@ import { BetaBadge } from "./Shell";
 
 const FEATURES = [
   { icon: "✂", title: "Edits your clip for you", text: "Picks the best parts, trims the pauses, crops it vertical and adds captions." },
-  { icon: "⭐", title: "Highlight videos", text: "No talking needed: picks the best moments from sports, events or trips." },
+  { icon: "⭐", title: "Highlight videos", text: "No talking needed: picks the best moments from games, workouts, events or trips." },
   { icon: "💬", title: "Change it by chatting",text: "Say “make it 20 seconds” or “cut the intro”. Every version is kept." },
   { icon: "🖼", title: "Photos into video", text: "Put your photos in order, add your music, done." },
   { icon: "🎬", title: "Studio", text: "Longer, scripted videos with scenes, voice-overs and titles. For selected accounts.", beta: true },

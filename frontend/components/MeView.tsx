@@ -133,8 +133,8 @@ function CustomApi({ ai, onChange }: { ai: AiKeyState; onChange: () => void }) {
 
       <p className="text-xs text-white/40">
         A saved key is checked with Google, kept encrypted, never shown again (only its last 4 characters) and used only for your own videos. Whichever key is used, what
-        the AI works on (what is said in your video, a few frames, your file names and messages) goes to Google&apos;s Gemini, which may use it to improve its products on
-        free keys. Don&apos;t upload anything confidential.
+        the AI works on (what is said in your video, a few frames, your file names and messages; for highlight videos, a small copy of the whole video with its sound)
+        goes to Google&apos;s Gemini, which may use it to improve its products on free keys. Don&apos;t upload anything confidential.
       </p>
     </Section>
   );

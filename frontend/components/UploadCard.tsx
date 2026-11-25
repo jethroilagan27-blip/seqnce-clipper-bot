@@ -259,7 +259,7 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
           </div>
           <p className="mt-1.5 text-xs text-white/50">
             {highlight
-              ? "Picks the best moments by what happens on screen and how loud it gets. No talking needed (sports, events, trips, games)."
+              ? "The AI watches your video and keeps whole moments, from the build-up to the result. No talking needed (sports, workouts, events, trips)."
               : "Cuts by what is said, with captions. A video without speech is made into highlights instead."}
           </p>
         </div>

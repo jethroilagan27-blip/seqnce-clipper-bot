@@ -12,15 +12,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.ai import AIError
-from app.ai.schemas import HighlightProposal, HighlightRevision, RankedMoment
+from app.ai.schemas import HighlightProposal, HighlightRevision, WatchedMoment
 from app.config import get_settings
 from app.editing import moments as mo
 from app.editing.cuts import Cut
 from app.editing.ffgraph import build_filtergraph, compute_crop
 from app.pipeline import highlight
 from app.pipeline.prepare import job_temp_dir
+from app.services import media
 
-# ---------- finding moments (pure) ----------
+# ---------- finding moments without an AI (pure) ----------
 
 def _video(seconds: float, busy: list[tuple[float, float]], cut_at: float | None = None) -> np.ndarray:
     """Grey frames at 4 fps: still, except noisy movement in the `busy` stretches and one hard cut."""
@@ -48,8 +49,8 @@ def test_movement_and_loud_sound_stand_out():
     loud = mo.loudness_series(sound, 16000, len(motion))
     assert loud[int(41 * 4)] > 0.7 and loud[int(5 * 4)] == 0
     found = mo.candidates(motion, loud, 60, [], target=15)
-    best = sorted(found, key=lambda m: -m.local)[:5]
-    assert any(20 <= m.start < 28 for m in best) and any(38 <= m.start < 43 for m in best)
+    best = sorted(found, key=lambda m: -m.local)[:4]
+    assert any(m.start < 28 and m.end > 20 for m in best) and any(m.start < 43 and m.end > 40 for m in best)
 
 
 def test_candidates_cover_the_whole_video_without_overlapping():
@@ -58,7 +59,7 @@ def test_candidates_cover_the_whole_video_without_overlapping():
     assert 20 <= len(found) <= 40
     assert all(a.end <= b.start + 1e-6 for a, b in zip(found, found[1:]))
     assert found[0].start < 120 and found[-1].end > 480  # quiet parts get looked at too
-    assert all(mo.MIN_MOMENT_S <= m.duration <= 3.6 for m in found)
+    assert all(mo.MIN_MOMENT_S <= m.duration <= 6.01 for m in found)
 
 
 def test_a_flat_or_tiny_video_still_gives_moments():
@@ -75,35 +76,73 @@ def test_a_moment_does_not_straddle_a_camera_cut():
     assert mo._snap_to_cuts(10.0, 12.0, [11.0]) == (10.0, 12.0)  # neither side is long enough alone
 
 
-def test_choosing_takes_the_best_up_to_the_wanted_length_in_time_order():
-    pool = [mo.Moment(i * 5, i * 5 + 3, 0, score=s) for i, s in enumerate([0.1, 0.9, 0.2, 0.8, 0.7, 0.95, 0.3])]
-    chosen = mo.choose(pool, target=9, duration=40)
-    assert [m.start for m in chosen] == [5, 15, 25]  # the three best, as they happen
-    assert sum(m.duration for m in mo.choose(pool, target=60, duration=40)) == 21  # everything there is
+# ---------- whole actions ----------
+
+def test_times_are_read_the_way_the_ai_writes_them():
+    assert mo.parse_clock("01:15") == 75 and mo.parse_clock("0:07.5") == 7.5 and mo.parse_clock("1:02:03") == 3723
+    assert mo.parse_clock("42") == 42 and mo.parse_clock("12.5s") == 12.5
+    for junk in ("", "soon", "1:2:3:4", "-3", "nan", "inf", "1::2"):
+        assert mo.parse_clock(junk) is None, junk
 
 
-# ---------- the AI's opinion ----------
-
-def _moments(n: int) -> list[mo.Moment]:
-    return [mo.Moment(i * 5.0, i * 5.0 + 3, local=0.5, motion=0.6, loud=0.1) for i in range(n)]
+def _m(start: float, end: float, score: float, **kw) -> mo.Moment:
+    return mo.Moment(start, end, 0.0, score=score, **kw)
 
 
-def test_the_ai_opinion_is_clamped_and_unknown_ids_ignored():
-    proposal = HighlightProposal(
-        main_subject="x", hook_text="t", hook_color="red",
-        moments=[RankedMoment(id=1, score=999, label="  big    jump ", focus_x=7),
-                 RankedMoment(id=2, score=0, label="blur", focus_x=0.5),
-                 RankedMoment(id=99, score=10, label="ghost", focus_x=0.5)],
-    )
-    ranked = highlight.rank(_moments(3), proposal)
-    assert ranked[0].score <= 1 and ranked[0].focus_x == 1.0 and ranked[0].label == "big jump"
-    assert ranked[1].score == 0  # the AI said it's no good
-    assert 0 < ranked[2].score < ranked[0].score and ranked[2].focus_x is None  # skipped by the AI
+def test_each_action_gets_room_and_actions_that_touch_are_one_part():
+    # a shot seen as two pieces with a small hole in it (the bug: "cut, then it comes back near the basket")
+    [one] = mo.whole_actions([_m(10, 12, 0.9, label="shot", focus_x=0.3), _m(14, 15, 0.7, label="goes in", focus_x=0.8)], 60)
+    assert one.start == pytest.approx(9.4) and one.end == pytest.approx(16.2) and one.label == "shot"
+    assert one.framing == "whole"  # they needed different crops: show it all
+    assert len(mo.whole_actions([_m(10, 12, 0.9), _m(20, 22, 0.7)], 60)) == 2  # far enough apart: two parts
 
 
-def test_without_an_ai_the_signals_decide():
-    ranked = highlight.rank(_moments(2), None)
-    assert [m.score for m in ranked] == [0.5, 0.5] and ranked[0].label
+def test_parts_are_never_tiny_never_outside_the_video_and_never_overlap():
+    [tiny] = mo.whole_actions([_m(0, 0.5, 1.0)], 60)
+    assert tiny.start == 0 and tiny.duration >= mo.MIN_PART_S
+    [last] = mo.whole_actions([_m(59.5, 60, 1.0)], 60)
+    assert last.end == 60 and last.duration >= mo.MIN_PART_S
+    [huge] = mo.whole_actions([_m(10, 200, 1.0)], 300)
+    assert huge.duration == mo.MAX_PART_S and huge.end == 201.0  # the result is kept
+    long_run = mo.whole_actions([_m(0, 30, 0.9), _m(29, 60, 0.8)], 90)
+    assert all(a.end <= b.start for a, b in zip(long_run, long_run[1:]))
+    assert mo.whole_actions([_m(5, 5, 1), _m(70, 80, 1)], 60) == []
+
+
+def test_assembling_takes_the_best_whole_moments_and_cuts_none_of_them_short():
+    found = [_m(i * 20, i * 20 + 6, s, label=str(i)) for i, s in enumerate([0.2, 0.9, 0.3, 0.8, 0.7, 0.95])]
+    chosen = mo.assemble(found, target=20, duration=140)
+    assert [m.label for m in chosen] == ["1", "3", "5"]  # the three best, in the order they happen
+    assert all(m.duration == pytest.approx(7.6) for m in chosen)  # whole, with their lead-in and result
+    [long_one] = mo.assemble([_m(10, 38, 1.0)], target=15, duration=60)
+    assert long_one.duration > 28  # a long set is shown completely rather than chopped
+    assert len(mo.assemble(found, target=90, duration=140)) == 6
+
+
+# ---------- the AI's answer ----------
+
+def _watched(start: str, end: str, score: int = 8, fx: float = 0.5, framing: str = "crop", label: str = "play") -> WatchedMoment:
+    return WatchedMoment(start=start, end=end, score=score, label=label, focus_x=fx, framing=framing)
+
+
+def test_the_ai_reply_is_checked_before_it_is_used():
+    proposal = HighlightProposal(main_subject="x", hook_text="t", hook_color="red", moments=[
+        _watched("00:05", "00:09", score=999, fx=7, label="  big    dunk "),
+        _watched("00:20", "00:20"),  # within one second
+        _watched("00:30", "00:35", score=0),  # not worth it
+        _watched("whenever", "00:35"), _watched("02:00", "02:05"),  # unreadable / outside a 60 s video
+        _watched("00:55", "01:30", framing="whole"),
+    ])
+    got = highlight.from_ai(proposal, 60)
+    assert [(m.start, m.end) for m in got] == [(5, 9), (20, 21), (55, 60)]
+    assert got[0].score == 1.0 and got[0].focus_x == 1.0 and got[0].label == "big dunk" and got[2].framing == "whole"
+
+
+def test_longer_videos_are_watched_more_coarsely():
+    assert highlight.watch_settings(40) == (4, False) and highlight.watch_settings(150) == (2, False)
+    for seconds in (300, 700, 1800):
+        fps, low = highlight.watch_settings(seconds)
+        assert low and seconds * (66 * fps + 32) < 250_000  # stays inside one minute's allowance
 
 
 # ---------- the filter graph ----------
@@ -117,6 +156,15 @@ def test_each_piece_can_have_its_own_crop_and_silence_replaces_missing_sound():
     assert "[vcat]scale=1080:1920" in g
     with pytest.raises(ValueError):
         build_filtergraph(cuts, crops[0], captions=False, music=False, music_volume=0.3, total=4, crops=crops[:1])
+
+
+def test_a_piece_can_show_the_whole_picture_next_to_cropped_ones():
+    cuts = [Cut(0, 2, 0.0, 0.2), Cut(3, 5, 2.0, 0.8, framing="whole")]
+    crops = [compute_crop(1920, 1080, 0.2), compute_crop(1920, 1080, 0.8)]
+    g = build_filtergraph(cuts, crops[0], captions=True, music=False, music_volume=0.3, total=4, crops=crops)
+    assert f"crop=606:1080:{crops[0].x}:0,scale=1080:1920" in g  # the cropped piece reaches the output size on its own
+    assert "force_original_aspect_ratio=decrease" in g and "boxblur" in g and "overlay=(W-w)/2:(H-h)/2" in g
+    assert "[vcat]fps=30,ass=captions.ass[vout]" in g  # nothing is cropped a second time
 
 
 # ---------- the whole pipeline, with real FFmpeg ----------
@@ -154,21 +202,16 @@ def _wait(c: TestClient, job_id: str, version: int | None = None) -> dict:
     raise AssertionError("job did not finish")
 
 
-def _in_busy(clip: dict) -> float:
-    return sum(max(0.0, min(clip["end"], b) - max(clip["start"], a)) for a, b in ((20, 28), (44, 52)))
-
-
-def test_a_highlight_picks_the_busy_loud_parts_without_any_ai_or_speech(client: TestClient, match_video: Path):
+def test_without_an_ai_the_busy_loud_stretches_are_shown_in_long_pieces(client: TestClient, match_video: Path):
     job_id = _upload(client, match_video, style="highlight", target_duration="15")
     job = _wait(client, job_id)
     assert job["status"] == "completed", job["error"]
     result = client.get(f"/api/jobs/{job_id}/result").json()
     plan = result["plan"]
     assert plan["style"] == "highlight" and plan["source"] == "fallback" and plan["captions"]["enabled"] is False
-    assert 12 <= result["rendered"]["duration"] <= 18.5
     assert (result["rendered"]["width"], result["rendered"]["height"]) == (1080, 1920)
-    busy = sum(_in_busy(c) for c in plan["clips"])
-    assert busy >= 0.7 * sum(c["end"] - c["start"] for c in plan["clips"]), plan["clips"]
+    assert all(c["end"] - c["start"] >= mo.MIN_PART_S for c in plan["clips"])  # no choppy two-second bits
+    assert any(c["start"] < 28 and c["end"] > 20 for c in plan["clips"]) and any(c["start"] < 52 and c["end"] > 44 for c in plan["clips"])
     assert any("movement and loudness only" in w for w in plan["warnings"])
     # the editor pages work without any words
     assert client.post(f"/api/jobs/{job_id}/timeline", json={}).json()["pages"] == []
@@ -176,77 +219,82 @@ def test_a_highlight_picks_the_busy_loud_parts_without_any_ai_or_speech(client: 
 
 
 class FakeHighlightAI:
-    """Loves moments in `favourite` seconds, hates the rest, and says the action is on the right."""
+    """"Watches" the video and reports the actions it was told about."""
 
-    def __init__(self, favourite: tuple[float, float]):
-        self.favourite = favourite
+    def __init__(self):
+        self.moments = [_watched("00:44", "00:52", score=10, fx=0.9, framing="crop", label="great play")]
         self.calls: list[dict] = []
         self.target = 15
         self.fail: str | None = None
 
-    def generate_structured(self, prompt, response_model, images=None):
-        self.calls.append({"prompt": prompt, "model": response_model.__name__, "images": len(images or [])})
+    def generate_from_video(self, prompt, response_model, video):
+        info = media.probe(video.path)
+        self.calls.append({"prompt": prompt, "model": response_model.__name__, "size": (info.width, info.height),
+                           "seconds": info.duration, "audio": info.has_audio, "fps": video.fps})
         if self.fail:
             raise AIError(self.fail)
-        ranked = []
-        for i, img in enumerate(images, 1):
-            start = float(img.label.split("(")[1].split("s")[0])
-            good = self.favourite[0] - 1 <= start < self.favourite[1]
-            ranked.append(RankedMoment(id=i, score=10 if good else 1, label="great play" if good else "waiting", focus_x=0.9))
-        common = dict(main_subject="a match", moments=ranked, hook_text="What a finish", hook_color="cyan")
+        common = dict(main_subject="a match", moments=self.moments, hook_text="What a finish", hook_color="cyan")
         if response_model is HighlightRevision:
-            return HighlightRevision(**common, reply="Now it shows the second half.", target_duration=self.target, hook_enabled=False)
+            return HighlightRevision(**common, reply="Now it shows the first goal.", target_duration=self.target, hook_enabled=False)
         return HighlightProposal(**common)
 
 
 @pytest.fixture
 def ai(monkeypatch: pytest.MonkeyPatch):
-    fake = FakeHighlightAI((44, 52))
+    fake = FakeHighlightAI()
     monkeypatch.setattr("app.pipeline.highlight.get_provider", lambda *a, **k: fake)
     return fake
 
 
-def test_the_ai_chooses_and_the_crop_follows_it_then_chat_changes_it(client: TestClient, ai: FakeHighlightAI, match_video: Path):
+def test_the_ai_watches_the_video_and_its_whole_moments_are_used(client: TestClient, ai: FakeHighlightAI, match_video: Path):
     job_id = _upload(client, match_video, style="highlight", target_duration="15", instructions="the second goal")
     job = _wait(client, job_id)
     assert job["status"] == "completed", job["error"]
     [call] = ai.calls  # ONE AI request for the whole highlight
-    assert call["model"] == "HighlightProposal" and call["images"] >= 10 and "the second goal" in call["prompt"]
+    assert call["model"] == "HighlightProposal" and "the second goal" in call["prompt"] and "01:00" in call["prompt"]
+    assert call["size"] == (640, 360) and abs(call["seconds"] - 60) < 1 and call["audio"] and call["fps"] == 4  # all of it, with sound
     plan = client.get(f"/api/jobs/{job_id}/result").json()["plan"]
     assert plan["source"] == "ai" and plan["hook"]["text"] == "What a finish" and plan["hook"]["enabled"]
-    assert all(c["focus_x"] == 0.9 for c in plan["clips"])
-    assert sum(1 for c in plan["clips"] if 43 <= c["start"] < 52) >= 2 and plan["clips"][0]["purpose"] == "hook"
+    [clip] = plan["clips"]  # ONE uncut part for one action
+    assert clip["start"] == pytest.approx(43.4) and clip["end"] == 53.0 and clip["focus_x"] == 0.9 and clip["framing"] == "crop"
     cuts = json.loads((job_temp_dir(job_id) / "cuts.json").read_text())["cuts"]
-    assert all(c["focus_x"] == 0.9 for c in cuts)
-    assert "crop=202:360:" in (job_temp_dir(job_id) / "filter.txt").read_text().split("[v0]")[0]  # per-piece crop
+    assert len(cuts) == 1 and cuts[0]["focus_x"] == 0.9
 
-    ai.favourite, ai.target = (20, 28), 20
-    assert client.post(f"/api/jobs/{job_id}/revisions", json={"message": "show the first goal instead"}).status_code == 202
+    ai.moments = [_watched("00:20", "00:28", framing="whole", label="first goal"), _watched("00:44", "00:48", fx=0.9)]
+    ai.target = 20
+    assert client.post(f"/api/jobs/{job_id}/revisions", json={"message": "show the first goal too"}).status_code == 202
     job = _wait(client, job_id, version=2)
     assert job["status"] == "completed" and job["current_version"] == 2, job["error"]
-    assert ai.calls[-1]["model"] == "HighlightRevision" and "show the first goal instead" in ai.calls[-1]["prompt"]
+    assert ai.calls[-1]["model"] == "HighlightRevision" and "show the first goal too" in ai.calls[-1]["prompt"]
+    assert "00:43-00:53" in ai.calls[-1]["prompt"]  # it is told what is in the video now
     v2 = client.get(f"/api/jobs/{job_id}/versions").json()["versions"][-1]
-    assert v2["reply"] == "Now it shows the second half." and v2["plan"]["target_duration"] == 20 and v2["plan"]["hook"]["enabled"] is False
-    assert sum(1 for c in v2["plan"]["clips"] if 19 <= c["start"] < 28) >= 2
+    assert v2["reply"] == "Now it shows the first goal." and v2["plan"]["target_duration"] == 20 and v2["plan"]["hook"]["enabled"] is False
+    first = v2["plan"]["clips"][0]
+    assert first["start"] <= 20 and first["end"] >= 28 and first["framing"] == "whole"
+    result = client.get(f"/api/jobs/{job_id}/result").json()
+    assert (result["rendered"]["width"], result["rendered"]["height"]) == (1080, 1920)  # whole + cropped parts joined fine
 
 
-def test_a_hand_trim_keeps_the_crop_position(client: TestClient, ai: FakeHighlightAI, match_video: Path):
+def test_a_hand_trim_keeps_the_crop_and_framing(client: TestClient, ai: FakeHighlightAI, match_video: Path):
+    ai.moments = [_watched("00:44", "00:52", fx=0.9, framing="whole")]
     job_id = _upload(client, match_video, style="highlight", target_duration="15")
     _wait(client, job_id)
-    clips = client.get(f"/api/jobs/{job_id}/result").json()["plan"]["clips"]
-    first = clips[0]
+    first = client.get(f"/api/jobs/{job_id}/result").json()["plan"]["clips"][0]
     edit = {"clips": [{"start": first["start"] + 0.3, "end": first["end"] + 0.5, "purpose": "hook"}]}
     spec = client.post(f"/api/jobs/{job_id}/timeline", json={"edit": edit}).json()
-    assert spec["cuts"][0]["focus_x"] == 0.9
+    assert spec["cuts"][0]["focus_x"] == 0.9 and spec["cuts"][0]["framing"] == "whole"
 
 
-def test_when_the_ai_fails_the_highlight_is_still_made(client: TestClient, ai: FakeHighlightAI, match_video: Path):
+def test_when_the_ai_fails_or_finds_nothing_the_highlight_is_still_made(client: TestClient, ai: FakeHighlightAI, match_video: Path):
     ai.fail = "The AI service is rate-limited right now."
-    job_id = _upload(client, match_video, style="highlight", target_duration="15")
-    job = _wait(client, job_id)
+    job = _wait(client, _upload(client, match_video, style="highlight", target_duration="15"))
     assert job["status"] == "completed", job["error"]
-    plan = client.get(f"/api/jobs/{job_id}/result").json()["plan"]
+    plan = client.get(f"/api/jobs/{job['id']}/result").json()["plan"]
     assert plan["source"] == "fallback" and "rate-limited" in plan["fallback_reason"] and plan["hook"]["enabled"] is False
+    ai.fail, ai.moments = None, []
+    job = _wait(client, _upload(client, match_video, style="highlight", target_duration="15"))
+    plan = client.get(f"/api/jobs/{job['id']}/result").json()["plan"]
+    assert plan["source"] == "fallback" and "no moment" in plan["fallback_reason"]
 
 
 def test_an_unknown_style_is_refused(client: TestClient, sample_video: Path):
@@ -256,22 +304,24 @@ def test_an_unknown_style_is_refused(client: TestClient, sample_video: Path):
 
 
 @pytest.mark.live_ai
-def test_live_gemini_picks_the_moments_asked_for(client: TestClient, tmp_path: Path):
-    """The real AI: a red ball bounces on the right during 20-28 s of an otherwise empty video (no sound at all)."""
-    out = tmp_path / "ball.mp4"
+def test_live_gemini_picks_whole_actions(client: TestClient, tmp_path: Path):
+    """The real AI: in an otherwise still 40 s video, a ball flies across into a "basket" during 12-18 s (no sound)."""
+    out = tmp_path / "shot.mp4"
     subprocess.run(
         [get_settings().ffmpeg, "-y", "-loglevel", "error",
-         "-f", "lavfi", "-i", "color=c=0x1d5c2f:s=640x360:r=25:d=60",
-         "-f", "lavfi", "-i", "color=c=red:s=70x70:r=25:d=60",
-         "-filter_complex", "[0:v][1:v]overlay=x=470+40*sin(5*t):y=140+90*sin(8*t):enable='between(t,20,28)'",
-         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", "60", str(out)],
+         "-f", "lavfi", "-i", "color=c=0x1d5c2f:s=640x360:r=25:d=40",
+         "-f", "lavfi", "-i", "color=c=orange:s=44x44:r=25:d=40",
+         "-filter_complex",
+         "[0:v]drawbox=x=540:y=190:w=70:h=14:color=white:t=fill[court];"
+         "[court][1:v]overlay=x='if(lt(t,12),40,min(40+(t-12)*90,553))':y='if(lt(t,12),290,if(lt(t,17.7),290-270*sin((t-12)/5.7*2.4),150+(t-17.7)*120))'",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", "40", str(out)],
         check=True,
     )
-    job_id = _upload(client, out, style="highlight", target_duration="15", instructions="only the moments where the red square is bouncing")
+    job_id = _upload(client, out, style="highlight", target_duration="15", instructions="the basketball shot: the orange ball flying into the basket")
     job = _wait(client, job_id)
     assert job["status"] == "completed", job["error"]
     plan = client.get(f"/api/jobs/{job_id}/result").json()["plan"]
-    print("LIVE PLAN", plan["source"], plan["fallback_reason"], plan["hook"], [(c["start"], c["end"], c["focus_x"], c["reason"]) for c in plan["clips"]])
+    print("LIVE PLAN", plan["source"], plan["fallback_reason"], plan["hook"],
+          [(c["start"], c["end"], c.get("framing"), c.get("focus_x"), c["reason"]) for c in plan["clips"]])
     assert plan["source"] == "ai", plan["fallback_reason"]
-    inside = [c for c in plan["clips"] if c["start"] < 28 and c["end"] > 20]
-    assert inside and sum(c["focus_x"] > 0.6 for c in inside if c["focus_x"] is not None) >= 1
+    assert any(c["start"] <= 13 and c["end"] >= 17 for c in plan["clips"]), plan["clips"]  # the whole flight in one uncut part

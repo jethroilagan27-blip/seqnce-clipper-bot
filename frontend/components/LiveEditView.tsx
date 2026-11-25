@@ -108,8 +108,8 @@ export default function LiveEditView({ job }: { job: Job }) {
     sub = `Play the preview now. The final video is still being rendered (${job.progress}%).`;
   }
   if (job.settings.style === "highlight" && !hasPlan) {
-    title = job.stage === "planning" ? "The AI is picking the highlights…" : "Finding the moments…";
-    sub = job.settings.style_note || "Looking for movement, loud moments and scene changes, then choosing the best ones.";
+    title = job.stage === "planning" ? "The AI is watching your video…" : "Getting your video ready…";
+    sub = job.settings.style_note || "It watches the whole thing and picks complete moments. This can take a minute or two.";
   }
 
   return (

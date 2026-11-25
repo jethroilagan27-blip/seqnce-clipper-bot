@@ -139,7 +139,7 @@ export type ManualEdit = {
 /** What the browser needs to preview an edit (computed by the server with the renderer's own code). */
 export type TimelineSpec = {
   total: number;
-  cuts: { start: number; end: number; out_start: number; focus_x?: number | null }[];
+  cuts: { start: number; end: number; out_start: number; focus_x?: number | null; framing?: "crop" | "whole" | null }[];
   pages: { start: number; end: number; text: string }[];
   captions_enabled: boolean;
   captions_pos: Pos | null;

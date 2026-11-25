@@ -48,20 +48,25 @@ class RevisionProposal(BaseModel):
     )
 
 
-class RankedMoment(BaseModel):
-    """The AI's opinion of one candidate moment of a highlight video. Every field is required, so none is skipped."""
+class WatchedMoment(BaseModel):
+    """One highlight the AI saw while watching the video. Every field is required, so none is skipped."""
 
-    id: int = Field(description="The moment's number, exactly as labelled")
-    score: int = Field(description="0 = boring or unusable, 10 = a must-have highlight")
+    start: str = Field(description="MM:SS where the action begins, including its set-up")
+    end: str = Field(description="MM:SS where the action is over and its result has been seen")
+    score: int = Field(description="1 = barely worth keeping, 10 = a must-have highlight")
     label: str = Field(description="What happens, in at most 6 words")
     focus_x: float = Field(description="Where the action is horizontally: 0 = left edge, 0.5 = middle, 1 = right edge")
+    framing: Literal["crop", "whole"] = Field(
+        description="crop: everything that matters stays in a narrow upright part of the picture. "
+                    "whole: it is spread or travels across the width, so the full picture must be shown"
+    )
 
 
 class HighlightProposal(BaseModel):
     """What we ask the AI for when making a highlight video."""
 
-    main_subject: str = Field(description="What the footage is, one short phrase")
-    moments: list[RankedMoment] = Field(description="One entry for EVERY moment shown")
+    main_subject: str = Field(description="What the footage is (the sport, exercise, event...), one short phrase")
+    moments: list[WatchedMoment] = Field(description="The highlights, each a complete action")
     hook_text: str = Field(description="A punchy on-screen title of at most 7 words, true to what is shown")
     hook_color: Literal["yellow", "white", "red", "cyan", "green", "pink", "orange"]
 

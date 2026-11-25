@@ -166,7 +166,7 @@ export default function LivePreview({
   const focus = current?.focus_x ?? spec.reframe.focus_x;
   const left = k >= 1 ? -Math.min(Math.max(focus * k - 0.5, 0), k - 1) * 100 : 0;
   const videoStyle: React.CSSProperties =
-    k >= 1
+    k >= 1 && current?.framing !== "whole" // "whole": the full picture, as the finished video shows it
       ? { position: "absolute", top: 0, height: "100%", width: `${k * 100}%`, left: `${left}%`, maxWidth: "none" }
       : { position: "absolute", left: 0, width: "100%", top: "50%", transform: "translateY(-50%)" };
 

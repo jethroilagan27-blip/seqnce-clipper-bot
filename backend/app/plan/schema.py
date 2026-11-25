@@ -23,6 +23,7 @@ class Clip(BaseModel):
     purpose: Purpose
     reason: str = ""
     focus_x: float | None = Field(default=None, ge=0, le=1)  # this clip's own 9:16 crop position (highlights)
+    framing: Literal["crop", "whole"] | None = None  # highlights: crop around focus_x, or show the whole picture
 
     @property
     def duration(self) -> float:
@@ -31,8 +32,9 @@ class Clip(BaseModel):
     @model_serializer(mode="wrap")
     def _only_say_what_is_set(self, handler):
         data = handler(self)
-        if data.get("focus_x") is None:  # talking videos have one crop for the whole plan: no per-clip field
-            data.pop("focus_x", None)
+        for key in ("focus_x", "framing"):  # talking videos have one crop for the whole plan: no per-clip fields
+            if data.get(key) is None:
+                data.pop(key, None)
         return data
 
 
