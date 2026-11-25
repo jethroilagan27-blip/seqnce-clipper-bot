@@ -526,6 +526,15 @@ def count_active_jobs(user_id: int) -> int:
         )
 
 
+def list_jobs_for_user(user_id: int | None, limit: int = 200) -> list[dict[str, Any]]:
+    """One person's videos, most recently changed first (user_id None = made without accounts)."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE user_id IS ? ORDER BY updated_at DESC, created_at DESC LIMIT ?", (user_id, limit)
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]  # type: ignore[misc]
+
+
 def purge_auth() -> None:
     """Forget expired sessions and invites and old usage records (called at startup)."""
     now = _now()

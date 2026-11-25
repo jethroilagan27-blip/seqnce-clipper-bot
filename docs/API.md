@@ -34,11 +34,14 @@ Used by the website only when `GET /api/health` reports `upload.chunk_mb` (a num
 4. `DELETE /api/uploads/{upload_id}` gives up. Unfinished uploads are deleted after 12 hours; one person can have 6 at a time. Someone else's upload id answers `404`.
 Errors: `413` too large/long · `415` not an mp4 · `422` unreadable video / bad settings.
 
+## Library (`GET /api/library`)
+The signed-in account's own videos from all three modes (admins too: only their own), newest first. → `{ items: [{ kind: "video" | "photos" | "studio", id, title, status: "ready" | "working", updated_at, duration, thumb, video, download }], keep_days: { video, photos, studio } }`. `thumb` / `video` / `download` are API paths (add the media token). Failed jobs with nothing to watch and projects never rendered are not listed.
+
 ## Admin (`GET /api/admin/users`)
 Admins only (everyone else, and servers without accounts, get `404`). → `{ totals: { accounts, new_24h, new_7d }, users: [{ id, email, is_admin, disabled, plan, created_at, videos_stored, videos_24h, chats_24h }] }`, newest first. Read-only; no password hashes or keys.
 
 ## Your own Gemini key (`/api/account/ai-key`)
-With `SHARE_SERVER_AI_KEY=true` every account uses the server's key (`mode: "server"`). Otherwise, with accounts on, the AI runs on the key of the account that asked (admins fall back to the server's `GEMINI_API_KEY`; everyone else without a key gets basic cuts and a note pointing to Settings). `GET` → `{ mode: "own" | "server", has_key, hint }` (`hint` is `…` + the last 4 characters, the only part ever shown; `/api/auth/me` carries the same as `user.ai`). `PUT { key }` checks the key with Google (`400` if it isn't valid, `422` if it doesn't look like a key, `429` after 10 tries in 15 minutes), then stores it encrypted. `DELETE` removes it. Without accounts (your own computer) the key in `.env` is used and `PUT` / `DELETE` answer `404`. No route ever returns the key; responses are `Cache-Control: no-store`.
+A key the account saved itself always comes first. Without one, `SHARE_SERVER_AI_KEY=true` gives every account the server's key (`mode: "server"`; `system: true` means removing a personal key falls back to it). Otherwise, with accounts on, the AI runs on the key of the account that asked (admins fall back to the server's `GEMINI_API_KEY`; everyone else without a key gets basic cuts and a note pointing to Settings). `GET` → `{ mode: "own" | "server", has_key, hint }` (`hint` is `…` + the last 4 characters, the only part ever shown; `/api/auth/me` carries the same as `user.ai`). `PUT { key }` checks the key with Google (`400` if it isn't valid, `422` if it doesn't look like a key, `429` after 10 tries in 15 minutes), then stores it encrypted. `DELETE` removes it. Without accounts (your own computer) the key in `.env` is used and `PUT` / `DELETE` answer `404`. No route ever returns the key; responses are `Cache-Control: no-store`.
 
 ## GET /api/jobs/{id}
 ```json

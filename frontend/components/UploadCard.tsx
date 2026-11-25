@@ -15,9 +15,31 @@ type Props = {
   /** Several videos (or a folder): they are edited one after another with the same settings. */
   onStartBatch: (items: Picked[], settings: EditSettings) => void;
   onCancel: () => void;
+  /** Files already chosen on the start screen (phone: "+ New video"). Read once, when the card appears. */
+  initialItems?: Picked[];
 };
 
 const MAX_BATCH = 100;
+
+/** Add what was chosen to the list. Other kinds of file are named, not silently lost. */
+function screen(already: Picked[], items: Picked[]): { picked: Picked[]; problem: string | null } {
+  const { accepted, skipped } = splitByExtension(items, VIDEO_EXTENSIONS);
+  const usable: Picked[] = [];
+  const notes: string[] = [];
+  for (const it of accepted) {
+    const why = problemWith(it);
+    if (why) notes.push(`${baseName(it.path)} (${why})`);
+    else usable.push(it);
+  }
+  skipped.forEach((s) => notes.push(`${baseName(s.path)} (not a video)`));
+  const merged = mergePicked(already, usable);
+  const over = merged.length > MAX_BATCH;
+  const parts: string[] = [];
+  if (over) parts.push(`Only the first ${MAX_BATCH} videos are kept.`);
+  if (notes.length) parts.push(`Left out: ${notes.slice(0, 4).join(", ")}${notes.length > 4 ? ` and ${notes.length - 4} more` : ""}. Use MP4, MOV, M4V, MKV or WebM files.`);
+  if (!usable.length && !notes.length) parts.push("No videos found there.");
+  return { picked: over ? merged.slice(0, MAX_BATCH) : merged, problem: parts.length ? parts.join(" ") : null };
+}
 
 /** Why a file can't be used, or null. */
 function problemWith(item: Picked): string | null {
@@ -55,11 +77,12 @@ function Toggle(props: {
   );
 }
 
-export default function UploadCard({ busy, uploadProgress, error, blockedReason, onStart, onStartBatch, onCancel }: Props) {
+export default function UploadCard({ busy, uploadProgress, error, blockedReason, onStart, onStartBatch, onCancel, initialItems }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
-  const [picked, setPicked] = useState<Picked[]>([]);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [first] = useState(() => (initialItems ? screen([], initialItems) : null));
+  const [picked, setPicked] = useState<Picked[]>(first?.picked ?? []);
+  const [fileError, setFileError] = useState<string | null>(first?.problem ?? null);
   const [dragging, setDragging] = useState(false);
   const [tracks, setTracks] = useState<string[] | null>(null);
   const [settings, setSettings] = useState<EditSettings>({
@@ -87,25 +110,11 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
     };
   }, [wantsMusic]);
 
-  /** Add what was chosen (files, or a folder with everything inside it) to the list. Other kinds of file are named, not silently lost. */
+  /** Add what was chosen (files, or a folder with everything inside it). */
   function add(items: Picked[]) {
-    const { accepted, skipped } = splitByExtension(items, VIDEO_EXTENSIONS);
-    const usable: Picked[] = [];
-    const notes: string[] = [];
-    for (const it of accepted) {
-      const why = problemWith(it);
-      if (why) notes.push(`${baseName(it.path)} (${why})`);
-      else usable.push(it);
-    }
-    skipped.forEach((s) => notes.push(`${baseName(s.path)} (not a video)`));
-    const merged = mergePicked(picked, usable);
-    const over = merged.length > MAX_BATCH;
-    setPicked(over ? merged.slice(0, MAX_BATCH) : merged);
-    const parts: string[] = [];
-    if (over) parts.push(`Only the first ${MAX_BATCH} videos are kept.`);
-    if (notes.length) parts.push(`Left out: ${notes.slice(0, 4).join(", ")}${notes.length > 4 ? ` and ${notes.length - 4} more` : ""}. Use MP4, MOV, M4V, MKV or WebM files.`);
-    if (!usable.length && !notes.length) parts.push("No videos found there.");
-    setFileError(parts.length ? parts.join(" ") : null);
+    const next = screen(picked, items);
+    setPicked(next.picked);
+    setFileError(next.problem);
   }
 
   const shownError = fileError ?? error;
@@ -130,7 +139,7 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
           setDragging(false);
           if (!busy) void safeFromDataTransfer(e.dataTransfer, MAX_BATCH * 4).then(add);
         }}
-        className={`flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition ${
+        className={`flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-5 text-center transition sm:py-12 ${
           dragging ? "border-violet-400 bg-violet-500/10" : "border-white/15 bg-white/[0.03]"
         } ${busy ? "cursor-default" : "cursor-pointer hover:border-white/40"}`}
       >
@@ -155,7 +164,10 @@ export default function UploadCard({ busy, uploadProgress, error, blockedReason,
             e.target.value = "";
           }}
         />
-        <p className="text-lg font-medium">Drag &amp; drop your videos or a whole folder here</p>
+        <p className="text-lg font-medium">
+          <span className="sm:hidden">Add videos</span>
+          <span className="hidden sm:inline">Drag &amp; drop your videos or a whole folder here</span>
+        </p>
         <div className="mt-1 flex flex-wrap justify-center gap-2">
           <button
             type="button"

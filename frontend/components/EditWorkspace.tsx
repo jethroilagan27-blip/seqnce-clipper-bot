@@ -509,7 +509,7 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
 
         {plan.warnings.length > 0 && <p className="text-xs text-white/40">Notes: {plan.warnings.join(" · ")}</p>}
 
-        <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/15 bg-panel/95 px-4 py-3 shadow-xl backdrop-blur">
+        <div className="sticky bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-10 sm:bottom-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/15 bg-panel/95 px-4 py-3 shadow-xl backdrop-blur">
           {isCurrent ? (
             <>
               <p className="min-w-0 text-sm">

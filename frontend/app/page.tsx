@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import AuthGate, { type AccountInfo } from "@/components/AuthGate";
 import BatchView from "@/components/BatchView";
+import HomeLauncher from "@/components/HomeLauncher";
 import ProcessingView from "@/components/ProcessingView";
 import ResultView from "@/components/ResultView";
-import Shell, { quotaBlock } from "@/components/Shell";
+import Shell, { hasStudio, quotaBlock } from "@/components/Shell";
 import UploadCard from "@/components/UploadCard";
 import {
   ApiError,
@@ -22,6 +23,7 @@ import {
   type Versions,
 } from "@/lib/api";
 import { createBatch, type Batch, type BatchRow } from "@/lib/batch";
+import { onHomeRequest, takeHomeRequest } from "@/lib/home";
 import type { Picked } from "@/lib/pickFiles";
 
 const POLL_MS = 1500;
@@ -80,6 +82,8 @@ function Studio({ account }: { account: AccountInfo }) {
   const [batchRows, setBatchRows] = useState<BatchRow[] | null>(null); // many videos edited one after another
   const [batchRunning, setBatchRunning] = useState(false);
   const batchRef = useRef<Batch | null>(null);
+  const [phonePick, setPhonePick] = useState<{ items: Picked[]; key: number } | null>(null); // chosen with "+ New video"
+  const busyRef = useRef(false); // something is being sent from this page: don't throw it away
 
   // Resume a job (or the list of a batch) after a page refresh.
   useEffect(() => {
@@ -147,6 +151,7 @@ function Studio({ account }: { account: AccountInfo }) {
       const id = await promise;
       remember(id);
       setJobId(id);
+      setPhonePick(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed.");
     } finally {
@@ -177,6 +182,7 @@ function Studio({ account }: { account: AccountInfo }) {
       },
     );
     batchRef.current = batch;
+    setPhonePick(null);
     setBatchRows(batch.rows());
     setBatchRunning(true);
     void batch.start().finally(() => {
@@ -222,20 +228,52 @@ function Studio({ account }: { account: AccountInfo }) {
     account.refresh();
   }
 
+  // The "Edit" tab: back to the start screen. Videos already sent keep being edited (they are in the Library).
+  const goHome = useEffectEvent(() => {
+    if (!takeHomeRequest() || busyRef.current) return;
+    newUpload();
+    setPhonePick(null);
+    reset();
+  });
+  useEffect(() => {
+    goHome(); // asked for while another page was showing
+    return onHomeRequest(() => goHome());
+  }, []);
+  useEffect(() => {
+    busyRef.current = uploadProgress !== null || batchRunning;
+  }, [uploadProgress, batchRunning]);
+
   const view = result ? "result" : jobId ? "processing" : batchRows ? "batch" : "upload";
+  const blocked = quotaBlock(account.user?.quota.videos, "video", "videos");
 
   return (
     <Shell user={account.user} onSignOut={account.user ? account.signOut : undefined} wide={view === "result"} section="video">
+      {view === "upload" && !phonePick && (
+        <div className="sm:hidden">
+          <HomeLauncher studio={hasStudio(account.user)} blockedReason={blocked} error={error} onPick={(items) => setPhonePick({ items, key: Date.now() })} />
+        </div>
+      )}
+
       {view === "upload" && (
-        <UploadCard
-          busy={uploadProgress !== null}
-          uploadProgress={uploadProgress}
-          error={error}
-          blockedReason={quotaBlock(account.user?.quota.videos, "video", "videos")}
-          onStart={handleStart}
-          onStartBatch={handleStartBatch}
-          onCancel={() => abortRef.current?.()}
-        />
+        // Phones show this once videos are chosen; wider screens show it straight away.
+        <div className={phonePick ? "space-y-4" : "hidden sm:block"}>
+          {phonePick && uploadProgress === null && (
+            <button type="button" onClick={() => setPhonePick(null)} className="text-sm text-violet-300 underline sm:hidden">
+              ← Back
+            </button>
+          )}
+          <UploadCard
+            key={phonePick?.key ?? 0}
+            initialItems={phonePick?.items}
+            busy={uploadProgress !== null}
+            uploadProgress={uploadProgress}
+            error={error}
+            blockedReason={blocked}
+            onStart={handleStart}
+            onStartBatch={handleStartBatch}
+            onCancel={() => abortRef.current?.()}
+          />
+        </div>
       )}
 
       {view === "batch" && batchRows && (

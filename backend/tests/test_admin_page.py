@@ -88,9 +88,14 @@ def test_with_sharing_on_every_account_uses_the_servers_key(shared: TestClient):
     provider = get_provider(uid)
     assert provider is not None and provider._api_key == SERVER_KEY and not provider._own_key  # type: ignore[attr-defined]
     me = shared.get("/api/auth/me", headers=_h(token))
-    assert me.json()["user"]["ai"] == {"mode": "server", "has_key": True, "hint": None}
+    assert me.json()["user"]["ai"] == {"mode": "server", "has_key": True, "hint": None, "system": True}
     assert SERVER_KEY not in me.text
-    aikeys.save(uid, "AIzaSyA-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1111")  # a key saved earlier is kept, but not used while sharing is on
+    own = "AIzaSyA-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1111"
+    aikeys.save(uid, own)  # their own "custom API" comes before the shared key
+    mine = get_provider(uid)
+    assert mine is not None and mine._api_key == own and mine._own_key  # type: ignore[attr-defined]
+    assert shared.get("/api/auth/me", headers=_h(token)).json()["user"]["ai"] == {"mode": "own", "has_key": True, "hint": "…1111", "system": True}
+    aikeys.remove(uid)  # removing it goes back to the shared one
     assert get_provider(uid)._api_key == SERVER_KEY  # type: ignore[union-attr]
 
 

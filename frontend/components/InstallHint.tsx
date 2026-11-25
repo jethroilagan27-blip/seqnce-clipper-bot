@@ -37,17 +37,18 @@ function snapshot(): Env {
   return /iphone|ipad|ipod/i.test(navigator.userAgent) ? "ios" : "other";
 }
 
-/** "Install Seqnce on your phone": a button where the browser supports it, the Share-menu steps on iPhone. */
+// "Get the app": the browser's own install window where it offers one, otherwise the steps for the phone in hand.
+// It installs the website as an app (home screen icon, full screen); videos are still edited on Seqnce's server.
 export default function InstallHint() {
   const env = useSyncExternalStore(subscribe, snapshot, () => "other" as Env);
-  const [declined, setDeclined] = useState(false);
+  const [steps, setSteps] = useState(false);
   if (env === "installed") return null;
 
-  async function install() {
-    if (!deferred) return;
+  async function get() {
+    if (!deferred) return setSteps(true);
     await deferred.prompt();
     const { outcome } = await deferred.userChoice;
-    if (outcome === "dismissed") setDeclined(true);
+    if (outcome === "dismissed") setSteps(true);
     deferred = null;
     notify();
   }
@@ -55,26 +56,26 @@ export default function InstallHint() {
   return (
     <section className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4 sm:p-5" aria-labelledby="install-h">
       <h3 id="install-h" className="font-semibold">
-        Use Seqnce as a phone app
+        Get the app for the full experience
       </h3>
-      <p className="text-sm text-white/55">Add it to your home screen: it opens full screen like an app, with its own icon. Nothing to download from a store.</p>
-      {env === "prompt" && !declined && (
-        <button onClick={install} className="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold hover:bg-violet-500">
-          Install the app
-        </button>
-      )}
-      {env === "ios" && (
-        <ol className="list-decimal space-y-1 pl-5 text-sm text-white/70">
-          <li>Open this page in Safari.</li>
-          <li>Tap the Share button (the square with an arrow).</li>
-          <li>Choose “Add to Home Screen”, then “Add”.</li>
-        </ol>
-      )}
-      {(env === "other" || declined) && (
-        <p className="text-sm text-white/55">
-          On Android (Chrome): open the ⋮ menu and choose “Install app” or “Add to Home screen”. On iPhone: use Safari&apos;s Share button, then “Add to Home Screen”.
-        </p>
-      )}
+      <p className="text-sm text-white/55">Seqnce on your home screen: one tap to open, full screen, no browser bars. Nothing to download from a store.</p>
+      <button type="button" onClick={get} className="w-full rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white hover:bg-violet-500">
+        Get the Seqnce app
+      </button>
+      {steps &&
+        (env === "ios" ? (
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-white/70">
+            <li>Open this page in Safari.</li>
+            <li>Tap the Share button (the square with an arrow).</li>
+            <li>Choose “Add to Home Screen”, then “Add”.</li>
+          </ol>
+        ) : (
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-white/70">
+            <li>Open your browser&apos;s ⋮ menu.</li>
+            <li>Choose “Install app” or “Add to Home screen”.</li>
+            <li>On iPhone instead: Safari&apos;s Share button, then “Add to Home Screen”.</li>
+          </ol>
+        ))}
     </section>
   );
 }

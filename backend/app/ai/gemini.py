@@ -27,7 +27,7 @@ class GeminiProvider:
         self._api_key = api_key
         self._model = model
         self._max_retries = max(1, max_retries)
-        self._own_key = own_key  # the key belongs to the person asking: error texts point them to Settings
+        self._own_key = own_key  # the key belongs to the person asking: error texts point them to the Me page
 
     def _scrub(self, text: str) -> str:
         """Never let the key reach a log line or an error message."""
@@ -74,7 +74,7 @@ class GeminiProvider:
                     ) from exc
                 if code in (400, 401, 403):
                     raise AIError(
-                        "Google rejected your Gemini key. Check it in Settings."
+                        "Google rejected your Gemini key. Check it on the Me page."
                         if self._own_key
                         else "The AI service rejected the request. Check GEMINI_API_KEY and GEMINI_MODEL."
                     ) from exc

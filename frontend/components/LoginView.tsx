@@ -3,12 +3,12 @@
 import { useState } from "react";
 import { ApiError, login, signup, type Session } from "@/lib/api";
 
-type Props = { onSession: (s: Session) => void; notice?: string | null; openSignup?: boolean };
+type Props = { onSession: (s: Session) => void; notice?: string | null; openSignup?: boolean; initialMode?: "signin" | "signup" };
 
 // Sign in, or create an account. When the server has OPEN_SIGNUP on, anyone can join with an email and a
 // password; otherwise sign-up needs an invite code from whoever runs the server (`python -m app.admin invite`).
-export default function LoginView({ onSession, notice, openSignup = false }: Props) {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+export default function LoginView({ onSession, notice, openSignup = false, initialMode = "signin" }: Props) {
+  const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");

@@ -447,18 +447,22 @@ def ensure_no_other_active_job(user: User) -> None:
 
 
 def ai_key_state(user: User) -> dict[str, Any]:
-    """Does this account have an AI to use, and whose? Never the key itself, only its last 4 characters."""
+    """Does this account have an AI to use, and whose? Never the key itself, only its last 4 characters.
+
+    mode "own": it runs (or would have to run) on the person's own key. mode "server": on Seqnce's key.
+    system: the server's key is there for this account, so removing a personal key falls back to it."""
     from . import aikeys
 
     cfg = get_settings()
-    if not cfg.auth_enabled or cfg.share_server_ai_key:  # your own computer, or the server's key is shared with everyone
-        return {"mode": "server", "has_key": bool(cfg.gemini_api_key), "hint": None}
+    if not cfg.auth_enabled:  # your own computer: the key in .env
+        return {"mode": "server", "has_key": bool(cfg.gemini_api_key), "hint": None, "system": bool(cfg.gemini_api_key)}
+    system = bool(cfg.gemini_api_key) and (cfg.share_server_ai_key or user.is_admin)
     hint = aikeys.hint(user.id) if aikeys.load(user.id) else None
     if hint:
-        return {"mode": "own", "has_key": True, "hint": hint}
-    if user.is_admin and cfg.gemini_api_key:
-        return {"mode": "server", "has_key": True, "hint": None}  # admins fall back to the server's key
-    return {"mode": "own", "has_key": False, "hint": None}
+        return {"mode": "own", "has_key": True, "hint": hint, "system": system}
+    if system:
+        return {"mode": "server", "has_key": True, "hint": None, "system": True}
+    return {"mode": "server" if cfg.share_server_ai_key else "own", "has_key": False, "hint": None, "system": False}
 
 
 def user_payload(user: User) -> dict[str, Any]:

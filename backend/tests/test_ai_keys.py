@@ -40,9 +40,9 @@ def _join(c: TestClient, email: str) -> tuple[str, int]:
 
 def test_saving_a_key_hides_it_afterwards(ac: TestClient):
     token, uid = _join(ac, "a@example.com")
-    assert ac.get("/api/account/ai-key", headers=_h(token)).json() == {"mode": "own", "has_key": False, "hint": None}
+    assert ac.get("/api/account/ai-key", headers=_h(token)).json() == {"mode": "own", "has_key": False, "hint": None, "system": False}
     r = ac.put("/api/account/ai-key", json={"key": f"  {KEY_A}  "}, headers=_h(token))
-    assert r.status_code == 200 and r.json() == {"mode": "own", "has_key": True, "hint": "…1111"}
+    assert r.status_code == 200 and r.json() == {"mode": "own", "has_key": True, "hint": "…1111", "system": False}
     assert ac.checked == [KEY_A]  # it was checked with Google, trimmed
     assert r.headers["cache-control"] == "no-store"
     # nothing the server says afterwards contains the key
@@ -98,7 +98,7 @@ def test_the_ai_uses_only_its_owners_key(ac: TestClient, monkeypatch: pytest.Mon
     admin_id = admin.create_user("boss@example.com", PASSWORD, is_admin=True)
     boss = get_provider(admin_id)
     assert isinstance(boss, GeminiProvider) and boss._api_key.startswith("server-key-")  # admins fall back to the server's key
-    assert "Settings" in no_key_reason()
+    assert "Me page" in no_key_reason()
     ac.put("/api/account/ai-key", json={"key": KEY_B}, headers=_h(tb))
     assert get_provider(ub)._api_key == KEY_B  # type: ignore[union-attr]
     assert get_provider(ua)._api_key == KEY_A  # type: ignore[union-attr]
@@ -134,7 +134,7 @@ def test_a_job_without_a_key_falls_back_and_says_where_to_add_one(ac: TestClient
         time.sleep(0.2)
     assert job["status"] == "completed"
     plan = ac.get(f"/api/jobs/{job_id}/analysis", headers=_h(token)).json().get("plan") or {}
-    assert plan.get("source") == "fallback" and "Settings" in (plan.get("fallback_reason") or "")
+    assert plan.get("source") == "fallback" and "Me page" in (plan.get("fallback_reason") or "")
 
 
 def test_the_key_never_reaches_a_log_line():
@@ -143,7 +143,7 @@ def test_the_key_never_reaches_a_log_line():
 
 
 def test_without_accounts_it_is_the_servers_own_setting(client: TestClient):
-    assert client.get("/api/account/ai-key").json() == {"mode": "server", "has_key": False, "hint": None}
+    assert client.get("/api/account/ai-key").json() == {"mode": "server", "has_key": False, "hint": None, "system": False}
     assert client.put("/api/account/ai-key", json={"key": KEY_A}).status_code == 404  # your own computer uses .env
     assert client.get("/api/auth/me").json()["user"]["ai"]["mode"] == "server"
 

@@ -14,7 +14,7 @@ import {
   type AuthUser,
   type Session,
 } from "@/lib/api";
-import LoginView from "./LoginView";
+import Welcome from "./Welcome";
 import Shell from "./Shell";
 
 export type AccountInfo = {
@@ -118,14 +118,14 @@ export default function AuthGate({ children }: { children: (account: AccountInfo
 
   if (phase === "loading")
     return (
-      <Shell user={null}>
+      <Shell user={null} nav={false}>
         <p className="text-center text-sm text-white/40">Connecting…</p>
       </Shell>
     );
 
   if (phase === "offline")
     return (
-      <Shell user={null}>
+      <Shell user={null} nav={false}>
       <div className="space-y-4 text-center">
         <p role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           Can&apos;t reach the Seqnce server. Is the backend running?
@@ -145,8 +145,8 @@ export default function AuthGate({ children }: { children: (account: AccountInfo
 
   if (phase === "login")
     return (
-      <Shell user={null}>
-        <LoginView onSession={onSession} notice={notice} openSignup={signupOpen} />
+      <Shell user={null} nav={false} wide>
+        <Welcome onSession={onSession} notice={notice} openSignup={signupOpen} />
       </Shell>
     );
 

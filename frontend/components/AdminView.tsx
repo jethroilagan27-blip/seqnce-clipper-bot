@@ -38,7 +38,7 @@ export default function AdminView({ account }: { account: AccountInfo }) {
   const shown = data?.users.filter((u) => u.email.toLowerCase().includes(wanted)) ?? [];
 
   return (
-    <Shell user={account.user} onSignOut={account.user ? account.signOut : undefined} wide>
+    <Shell user={account.user} onSignOut={account.user ? account.signOut : undefined} wide section="admin">
       <div className="space-y-5">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">Accounts</h2>

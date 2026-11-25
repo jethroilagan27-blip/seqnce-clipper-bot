@@ -255,8 +255,14 @@ export async function authedFetch(path: string, init: RequestInit = {}): Promise
 export type Quota = { used: number; limit: number | null; resets_at: string | null };
 /** What an account may use (plan + per-account changes). The server enforces these; the page only hides or locks things. */
 export type AccountFeatures = Record<string, number | boolean | null> & { studio: boolean };
-/** Whose AI the account uses. "own" = the key it saved in Settings; "server" = the server's (your own computer, or an admin). Never the key itself. */
-export type AiKeyState = { mode: "own" | "server"; has_key: boolean; hint: string | null };
+/** Whose AI the account uses. "own" = a key it saved itself (Me → Custom API); "server" = Seqnce's. Never the key itself. */
+export type AiKeyState = {
+  mode: "own" | "server";
+  has_key: boolean;
+  hint: string | null;
+  /** Seqnce's key is available to this account: removing a personal key falls back to it. */
+  system: boolean;
+};
 export type AuthUser = {
   ai: AiKeyState;
   email: string;
@@ -321,6 +327,27 @@ export async function getAdminUsers(): Promise<AdminOverview> {
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(errorMessage(data, `Request failed (HTTP ${res.status}).`));
   return data as AdminOverview;
+}
+
+export type LibraryItem = {
+  kind: "video" | "photos" | "studio";
+  id: string;
+  title: string;
+  status: "ready" | "working";
+  updated_at: string;
+  duration: number | null;
+  /** API paths (turn into addresses with mediaUrl). */
+  thumb: string | null;
+  video: string | null;
+  download: string | null;
+};
+export type Library = { items: LibraryItem[]; keep_days: Record<LibraryItem["kind"], number | null> };
+/** Every video this account has made, newest first. */
+export async function getLibrary(): Promise<Library> {
+  const res = await authedFetch("/api/library");
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(errorMessage(data, `Request failed (HTTP ${res.status}).`));
+  return data as Library;
 }
 
 export const login = (email: string, password: string) => postAuth<Session>("/api/auth/login", { email, password });
