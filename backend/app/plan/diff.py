@@ -72,6 +72,9 @@ def _settings_changes(old: dict[str, Any], new: dict[str, Any]) -> list[dict[str
     ncap = bool((new.get("captions") or {}).get("enabled"))
     if ocap != ncap:
         out.append({"field": "Captions", "before": "on" if ocap else "off", "after": "on" if ncap else "off"})
+    ofix, nfix = ((p.get("captions") or {}).get("fixes") or [] for p in (old, new))
+    if ofix != nfix:
+        out.append({"field": "Caption text", "before": f"{len(ofix)} corrected", "after": f"{len(nfix)} corrected"})
     for label, key in (("Caption position", "captions"), ("Hook position", "hook")):
         before, after = (old.get(key) or {}), (new.get(key) or {})
         if (before.get("x"), before.get("y")) != (after.get("x"), after.get("y")):

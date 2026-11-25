@@ -19,8 +19,10 @@ from pathlib import Path
 from typing import Any
 
 from .. import db, stages
+from ..editing import sentences
 from ..config import get_settings
 from ..errors import PipelineError
+from ..services.tls import drop_unusable_key_log
 from .prepare import job_temp_dir
 
 log = logging.getLogger(__name__)
@@ -40,6 +42,7 @@ def _get_model():
             from faster_whisper import WhisperModel
 
             log.info("loading whisper model %s on %s (%s)", *key)
+            drop_unusable_key_log()  # loading may check online for the model
             try:
                 _model = WhisperModel(key[0], device=key[1], compute_type=key[2])
             except Exception as exc:
@@ -107,6 +110,18 @@ def load_transcript(job: dict[str, Any]) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _words(raw: Any) -> list[dict[str, Any]]:
+    """Whisper's words, with the tails it splits off ("y" + "'all", "vlog" + "-style") put back on their word."""
+    out: list[dict[str, Any]] = []
+    for w in raw:
+        text = w.word.strip()
+        if out and text[:1] in ("'", "’", "-") and len(text) > 1 and not w.word.startswith(" "):
+            out[-1] = {**out[-1], "end": round(w.end, 2), "word": out[-1]["word"] + text}
+        else:
+            out.append({"start": round(w.start, 2), "end": round(w.end, 2), "word": text})
+    return out
+
+
 def _save_empty(job_id: str) -> None:
     """Highlight videos don't use words: an empty transcript keeps every later step and page working."""
     path = transcript_path(job_id)
@@ -159,10 +174,7 @@ def run(job: dict[str, Any]) -> None:
                 "start": round(seg.start, 2),
                 "end": round(seg.end, 2),
                 "text": text,
-                "words": [
-                    {"start": round(w.start, 2), "end": round(w.end, 2), "word": w.word.strip()}
-                    for w in (seg.words or [])
-                ],
+                "words": _words(seg.words or []),
             }
         )
         now = time.monotonic()
@@ -182,6 +194,7 @@ def run(job: dict[str, Any]) -> None:
         _switch_to_highlight(job, "No speech was found")
         return
 
+    segments = sentences.build(segments)  # Whisper's chunks stop mid-sentence: everything downstream wants real sentences
     out = {
         "language": info.language,
         "language_probability": round(info.language_probability, 3),

@@ -90,6 +90,15 @@ def apply_manual_edit(
         new["captions"]["enabled"] = edit.captions_enabled
         parts.append("turned captions " + ("on" if edit.captions_enabled else "off"))
 
+    if edit.caption_fixes is not None:
+        fixes = [f.model_dump() for f in sorted(edit.caption_fixes, key=lambda f: f.start)]
+        if fixes != (new["captions"].get("fixes") or []):
+            parts.append("corrected the captions")
+        if fixes:
+            new["captions"]["fixes"] = fixes
+        else:
+            new["captions"].pop("fixes", None)
+
     # Dragged positions: a block moves only when both coordinates arrive; "reset" puts it back.
     for name, box, x, y in (
         ("caption", new["captions"], edit.caption_x, edit.caption_y),

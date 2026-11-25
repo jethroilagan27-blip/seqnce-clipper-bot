@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_serializer
 
+from ..editing.fixes import MAX_FIXES, CaptionFix
 from ..editing.overlays import MAX_TEXTS, TextOverlay
 
 Purpose = Literal["hook", "main_content", "example", "conclusion"]
@@ -61,6 +62,14 @@ class Captions(BaseModel):
     # Where the user dragged the caption block (centre, fractions of the frame). None = the default spot.
     x: float | None = Field(default=None, ge=0, le=1)
     y: float | None = Field(default=None, ge=0, le=1)
+    fixes: list[CaptionFix] = Field(default_factory=list, max_length=MAX_FIXES)  # words the user corrected
+
+    @model_serializer(mode="wrap")
+    def _only_say_what_is_set(self, handler):
+        data = handler(self)
+        if not data.get("fixes"):
+            data.pop("fixes", None)
+        return data
 
 
 class Silence(BaseModel):

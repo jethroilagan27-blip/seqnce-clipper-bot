@@ -98,6 +98,9 @@ Then poll `GET /api/jobs/{id}`: while it runs `status` is `queued|running`, `rev
 ```
 `changes` is computed against the version that was current when the change was made. `removed` clips carry the ids/times of the *old* plan.
 
+## Correcting captions
+A hand edit may carry `caption_fixes`: the **complete** list of `{ start, end, text }` corrections (source-video seconds, one line of plain text up to 600 characters, at most 200; empty text hides the captions there; `[]` removes them all). They are stored in the plan (`captions.fixes`), applied to the captions in the preview and the render, and never change the transcript. Transcripts are stored as whole sentences built from the word timings, and planning and chat changes cut only between sentences.
+
 ## Timeline editing (clips by hand, live preview data)
 
 ### Hand edits can now replace the whole clip list

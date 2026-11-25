@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from .editing.fixes import MAX_FIXES, CaptionFix
 from .editing.overlays import MAX_TEXTS, TextOverlay
 
 
@@ -44,6 +45,7 @@ class ManualEdit(BaseModel):
     hook_color: HookColorName | None = None
     hook_duration_s: float | None = Field(default=None, ge=1, le=10)
     captions_enabled: bool | None = None
+    caption_fixes: list[CaptionFix] | None = Field(default=None, max_length=MAX_FIXES, description="The complete list of caption corrections")
     # Dragged positions (centre of the block, fractions of the frame). Send both x and y of a pair.
     caption_x: float | None = Field(default=None, ge=0, le=1)
     caption_y: float | None = Field(default=None, ge=0, le=1)

@@ -83,7 +83,7 @@ function CustomApi({ ai, onChange }: { ai: AiKeyState; onChange: () => void }) {
             spellCheck={false}
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            placeholder="AIza…"
+            placeholder="Paste the whole key"
             maxLength={300}
             disabled={busy}
             className={`${input} font-mono`}

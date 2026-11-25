@@ -70,6 +70,13 @@ def test_a_wrong_key_is_not_saved(ac: TestClient, monkeypatch: pytest.MonkeyPatc
         assert ac.put("/api/account/ai-key", json={"key": junk}, headers=_h(token)).status_code in (422,), junk
 
 
+def test_the_newer_key_format_with_a_dot_is_accepted(ac: TestClient):
+    token, uid = _join(ac, "a@example.com")
+    newer = "AQ.Fake0000000000000000000000000000000000000000000000_x"
+    assert ac.put("/api/account/ai-key", json={"key": newer}, headers=_h(token)).status_code == 200
+    assert aikeys.load(uid) == newer
+
+
 def test_checking_keys_is_limited(ac: TestClient):
     token, _ = _join(ac, "a@example.com")
     codes = [ac.put("/api/account/ai-key", json={"key": KEY_A}, headers=_h(token)).status_code for _ in range(aikeys.TRIES_PER_WINDOW + 2)]

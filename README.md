@@ -16,6 +16,7 @@ Upload an MP4. Seqnce transcribes it on your computer, asks an AI which parts ar
 - **Edit by hand:** a map of your whole video made of real frames, a list of numbered parts, a zoomed filmstrip to trim each one (handles snap to words), transcript click-to-cut, and title/captions controls.
 - **Live preview:** the browser plays your original video as the edit (cuts, crop, captions, title) before anything is rendered. The preview uses the same cut list as the renderer.
 - **Photo mode** (`/photos`, the "Edit with photos" tab): drop in as many photos as you like (JPG, PNG, WebP, iPhone HEIC), put them in order (drag, or sort by name / date taken), add your own music, pick the shape (9:16, 16:9, 1:1), and get a video with slow zoom and quick fades. "Fit to music" works out the time per photo so the video is exactly as long as the song. A 3½-minute video from 150 phone photos took about 2 minutes on a 12-core laptop.
+- **Whole sentences and fixable captions:** cuts are made between sentences rebuilt from the word timings, and in the editor's **Captions** tab you can correct a misheard word or name (the original transcript is kept).
 - **Your own text, draggable:** add titles in either mode and drag them on the preview; the auto captions and the title can be dragged too. What you place is what gets rendered.
 - **Live progress:** while it works you watch the transcript appear, then the AI's chosen parts, and can play the preview before the final render finishes.
 

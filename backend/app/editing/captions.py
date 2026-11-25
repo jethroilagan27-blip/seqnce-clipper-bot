@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 from .cuts import Cut
+from .fixes import CaptionFix
 from .overlays import TextOverlay, ass_text_lines
 
 SENTENCE_END = re.compile(r"[.!?…]$")
@@ -37,6 +38,30 @@ def remap_words(words: Sequence[dict[str, Any]], cuts: Sequence[Cut]) -> list[di
                 e = c.out_start + min(w["end"], c.end) - c.start
                 out.append({"start": s, "end": max(e, s + 0.05), "word": w["word"]})
                 break
+    return out
+
+
+def apply_fixes(words: Sequence[dict[str, Any]], fixes: Sequence[CaptionFix]) -> list[dict[str, Any]]:
+    """Source-time words with the user's corrections in place. The same number of words keeps each word's own timing;
+    otherwise the new words share the stretch the old ones covered, longer words getting more of it."""
+    out = list(words)
+    for fix in fixes:
+        inside = [i for i, w in enumerate(out) if fix.start - 0.01 <= (w["start"] + w["end"]) / 2 <= fix.end + 0.01]
+        if not inside:
+            continue
+        old = [out[i] for i in inside]
+        new = fix.text.split()
+        if len(new) == len(old):
+            replaced = [{**w, "word": text} for w, text in zip(old, new)]
+        else:
+            lo, hi = old[0]["start"], max(w["end"] for w in old)
+            weights = [len(t) + 1 for t in new]
+            at, replaced = lo, []
+            for text, weight in zip(new, weights):
+                end = at + (hi - lo) * weight / sum(weights)
+                replaced.append({"start": round(at, 3), "end": round(end, 3), "word": text})
+                at = end
+        out[inside[0]:inside[-1] + 1] = replaced
     return out
 
 

@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from .. import db
+from ..editing import sentences
 from ..ai import AIError, get_provider, no_key_reason
 from ..errors import PipelineError
 from ..ai.schemas import PlanProposal
@@ -33,6 +34,7 @@ Transcript, one line per segment as [start-end] text (seconds):
 
 Rules:
 - Return 1 to 5 clips. Every clip start/end MUST be copied from the segment timestamps above, so clips begin and end on full sentences.
+- Each clip must make sense on its own: never start mid-thought (on a line that only continues the one before) and never end on a line that leads into the next (for example ending in "and", "so", "because" or "like the"). Take the extra line when you need it to finish the thought. The last clip should end the video on a finished idea.
 - Total kept time should be close to {target}s (between {low:.0f}s and {high:.0f}s).
 - Keep clips in chronological order and do not overlap them.
 - Prioritise meaningful content over simply being short: a strong opening statement (hook), the key explanation(s), and a strong concluding statement.
@@ -98,7 +100,7 @@ def run(job: dict[str, Any]) -> None:
     duration = float(meta["duration"])
     target = float(job["settings_json"]["target_duration"])
     transcript = load_transcript(job)
-    segments = transcript["segments"]
+    segments = sentences.build(transcript["segments"])  # whole sentences, so cuts never fall mid-thought
     visual = job.get("visual_json") or {}
 
     plan: EditingPlan | None = None

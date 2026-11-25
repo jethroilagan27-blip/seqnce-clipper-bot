@@ -15,7 +15,8 @@ from ..errors import PipelineError
 from .schema import Clip
 
 MIN_CLIP_S = 1.5  # shorter clips are dropped as unusable
-SNAP_S = 1.0  # snap a clip edge to a sentence boundary if one is this close
+SNAP_S = 1.0  # an edge in a silence snaps to a sentence boundary this close
+REACH_S = 8.0  # an edge inside a sentence moves out to that sentence's edge, if it is at most this far
 MERGE_GAP_S = 0.3  # clips closer than this are merged (also removes overlaps/duplicates)
 MIN_RATIO = 0.6  # accepted total length, as a fraction of target...
 MAX_RATIO = 1.25  # ...and above (the max is enforced by trimming)
@@ -34,6 +35,27 @@ def _nearest(value: float, candidates: Sequence[float], tolerance: float) -> flo
     return best if best is not None and abs(best - value) <= tolerance else value
 
 
+def _sentence_start(t: float, segments: Sequence[dict[str, Any]]) -> float:
+    """Where a clip that was asked to start at `t` should start: on a sentence, so it never begins mid-thought."""
+    for i, s in enumerate(segments):
+        lo, hi = float(s["start"]), float(s["end"])
+        if lo < t < hi:
+            if hi - t < min(1.0, (hi - lo) / 4) and i + 1 < len(segments):  # only its tail: the next sentence was meant
+                return float(segments[i + 1]["start"])
+            return lo if t - lo <= REACH_S else t  # (a very long sentence can't be reached: leave it)
+    return _nearest(t, [float(s["start"]) for s in segments], SNAP_S)
+
+
+def _sentence_end(t: float, segments: Sequence[dict[str, Any]]) -> float:
+    for i, s in enumerate(segments):
+        lo, hi = float(s["start"]), float(s["end"])
+        if lo < t < hi:
+            if t - lo < min(1.0, (hi - lo) / 4) and i > 0:  # barely into it: the sentence before was meant
+                return float(segments[i - 1]["end"])
+            return hi if hi - t <= REACH_S else t
+    return _nearest(t, [float(s["end"]) for s in segments], SNAP_S)
+
+
 def _total(clips: list[dict[str, Any]]) -> float:
     return sum(c["end"] - c["start"] for c in clips)
 
@@ -50,7 +72,6 @@ def repair_and_validate(
     `segments` are transcript segments with 'start'/'end'.
     """
     warnings: list[str] = []
-    seg_starts = [float(s["start"]) for s in segments]
     seg_ends = [float(s["end"]) for s in segments]
 
     # 1-3: sanity, clamp, snap to sentence boundaries
@@ -71,8 +92,8 @@ def repair_and_validate(
         if (clamped_start, clamped_end) != (start, end):
             warnings.append(f"clip {i}: clamped to the video length")
         start, end = clamped_start, clamped_end
-        start = _nearest(start, seg_starts, SNAP_S)
-        end = _nearest(end, seg_ends, SNAP_S)
+        start = _sentence_start(start, segments)
+        end = _sentence_end(end, segments)
         if end - start < MIN_CLIP_S:
             warnings.append(f"clip {i}: shorter than {MIN_CLIP_S}s, dropped")
             continue

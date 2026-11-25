@@ -12,6 +12,7 @@ from google.genai import types
 from pydantic import ValidationError
 
 from ..config import get_settings
+from ..services.tls import drop_unusable_key_log
 from .base import AIError, LabeledImage, T, VideoInput
 
 log = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class GeminiProvider:
     name = "gemini"
 
     def __init__(self, api_key: str, model: str, max_retries: int = 3, own_key: bool = False) -> None:
+        drop_unusable_key_log()
         self._client = genai.Client(api_key=api_key)
         self._api_key = api_key
         self._model = model
@@ -168,6 +170,7 @@ class GeminiProvider:
 
 def check_key(api_key: str) -> None:
     """Ask Google whether this key works (a free call that lists nothing of ours). Raises AIError with a message fit to show."""
+    drop_unusable_key_log()
     client = genai.Client(api_key=api_key)  # kept in a variable: a temporary one is closed before the call is made
     try:
         client.models.get(model=get_settings().gemini_model)

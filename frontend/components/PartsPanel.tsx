@@ -114,7 +114,7 @@ export default function PartsPanel({ jobId, aspect, duration, clips, segments, b
       </ol>
       {editable && segments.length > 0 && (
         <p className="text-xs text-white/40">
-          Want to add a moment that isn&apos;t here? Open the <span className="text-white/60">Transcript</span> tab and click the sentences you want.
+          Want to add a moment that isn&apos;t here? Open the <span className="text-white/60">Captions</span> tab and tap the sentences you want.
         </p>
       )}
     </div>

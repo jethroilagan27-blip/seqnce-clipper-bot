@@ -65,7 +65,7 @@ def run(job: dict[str, Any]) -> None:
     captions_on = plan.captions.enabled
     pages: list[cap.Page] = []
     if captions_on:
-        out_words = cap.remap_words(words, cuts)
+        out_words = cap.remap_words(cap.apply_fixes(words, plan.captions.fixes), cuts)  # with the user's corrections
         pages = cap.build_pages(out_words, plan.captions.max_words_per_line)
         if not pages:
             captions_on = False

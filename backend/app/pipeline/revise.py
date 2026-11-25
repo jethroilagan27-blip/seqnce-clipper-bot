@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from .. import db
+from ..editing import sentences
 from ..ai import AIError, get_provider, no_key_reason
 from ..ai.schemas import RevisionProposal
 from ..errors import PipelineError
@@ -47,6 +48,7 @@ The user now says:
 Rules:
 - Return the COMPLETE new clip list, not a diff. Keep every clip the user did not ask to change exactly as it is (same start and end).
 - Every start/end MUST be copied from the transcript segment timestamps, so clips begin and end on full sentences. Keep clips chronological and non-overlapping (re-ordering is not supported; if asked to move something, explain that in your reply and keep the order).
+- A new or changed clip must make sense on its own: never start mid-thought and never end on a line that leads into the next one; take the extra line to finish the thought.
 - Keep the total close to the target length ({low}s to {high}s) unless the user asks for a different length; then set target_duration to the new length (15 to 90).
 - Only change the hook title, its colour, or captions if the user asks, or if a change to the clips makes the current hook wrong.
 - purpose must be one of: hook, main_content, example, conclusion. reason: one short sentence.
@@ -96,7 +98,7 @@ def run(job: dict[str, Any]) -> None:
         highlight.revise(job)
         return
     transcript = load_transcript(job)
-    segments = transcript["segments"]
+    segments = sentences.build(transcript["segments"])  # whole sentences, so cuts never fall mid-thought
     duration = float(job["metadata_json"]["duration"])
 
     provider = get_provider(job.get("user_id"))

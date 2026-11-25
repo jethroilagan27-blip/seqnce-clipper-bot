@@ -1,5 +1,6 @@
 "use client";
 
+import type { CaptionFix } from "@/lib/captionFixes";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   HOOK_CSS,
@@ -32,6 +33,7 @@ type Draft = {
   captionPos: Pos | null; // dragged position; null = the usual spot
   hookPos: Pos | null;
   texts: TextOverlay[]; // your own texts
+  captionFixes: CaptionFix[]; // corrected caption words
 };
 
 const asPos = (x?: number | null, y?: number | null): Pos | null => (x != null && y != null ? { x, y } : null);
@@ -49,6 +51,7 @@ function draftFrom(plan: Plan): Draft {
     captionPos: asPos(plan.captions?.x, plan.captions?.y),
     hookPos: asPos(hook.x, hook.y),
     texts: plan.texts ?? [],
+    captionFixes: plan.captions?.fixes ?? [],
   };
 }
 
@@ -73,6 +76,7 @@ function editFrom(plan: Plan, d: Draft): ManualEdit {
   }
   if (reset.length) edit.reset_positions = reset;
   if (JSON.stringify(d.texts) !== JSON.stringify(base.texts)) edit.texts = d.texts;
+  if (JSON.stringify(d.captionFixes) !== JSON.stringify(base.captionFixes)) edit.caption_fixes = d.captionFixes;
   return edit;
 }
 
@@ -341,8 +345,8 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
           {(
             [
               ["parts", "Parts"],
-              ["transcript", "Transcript"],
-              ["title", highlight ? "Title & text" : "Title & captions"],
+              ["transcript", "Captions"],
+              ["title", highlight ? "Title & text" : "Title & style"],
             ] as const
           ).filter(([key]) => !(highlight && key === "transcript")).map(([key, label]) => (
             <button
@@ -379,9 +383,8 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
         {tab === "transcript" && (
           <div className="space-y-2">
             <p className="text-sm text-white/60">
-              Everything that was said.{" "}
-              {editable ? "Click a sentence to cut it out of your short, or to add it back." : ""} Highlighted sentences are in
-              your short.
+              Everything that was said. Highlighted sentences are in your short.
+              {editable && " Tap a sentence to cut it out or add it back. Tap ✎ to correct a word or a name in the captions, then press Apply & render."}
             </p>
             <TranscriptEditor
               segments={segments}
@@ -389,6 +392,8 @@ export default function EditWorkspace({ jobId, shown, isCurrent, busy, tabs, sid
               playheadSrc={playhead}
               editable={editable}
               onToggle={(s) => change({ clips: toggleRange(draft.clips, s, duration) })}
+              fixes={draft.captionFixes}
+              onFix={(captionFixes) => change({ captionFixes })}
               onSeek={seek}
             />
           </div>

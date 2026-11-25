@@ -28,7 +28,7 @@ def build_spec(plan: EditingPlan, transcript: dict[str, Any], meta: dict[str, An
     if plan.captions.enabled and cuts:
         pages = [
             {"start": p.start, "end": p.end, "text": p.text}
-            for p in cap.build_pages(cap.remap_words(words, cuts), plan.captions.max_words_per_line)
+            for p in cap.build_pages(cap.remap_words(cap.apply_fixes(words, plan.captions.fixes), cuts), plan.captions.max_words_per_line)
         ]
 
     hook = plan.hook

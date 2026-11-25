@@ -88,7 +88,7 @@ export type Plan = {
   target_duration: number;
   clips: PlanClip[];
   hook?: Hook;
-  captions?: { enabled: boolean; x?: number | null; y?: number | null };
+  captions?: { enabled: boolean; x?: number | null; y?: number | null; fixes?: { start: number; end: number; text: string }[] };
   texts?: TextOverlay[];
   instructions?: string;
   warnings: string[];
@@ -121,6 +121,7 @@ export type Version = {
 export type Versions = { current: number; versions: Version[] };
 
 export type ManualEdit = {
+  caption_fixes?: { start: number; end: number; text: string }[];
   hook_enabled?: boolean;
   hook_text?: string;
   hook_color?: string;

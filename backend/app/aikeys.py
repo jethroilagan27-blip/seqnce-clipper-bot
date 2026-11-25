@@ -23,7 +23,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from . import db
 from .config import get_settings
 
-KEY_SHAPE = re.compile(r"^[A-Za-z0-9_\-]{20,200}$")  # Google keys are ~39 characters starting "AIza"; be lenient about the rest
+KEY_SHAPE = re.compile(r"^[A-Za-z0-9_.\-]{20,200}$")  # Google keys start "AIza" (older) or "AQ." (newer); be lenient about the rest
 TRIES_PER_WINDOW = 10
 WINDOW_S = 15 * 60
 _tries: dict[int, deque[float]] = defaultdict(deque)
