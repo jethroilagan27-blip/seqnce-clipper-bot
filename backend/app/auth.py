@@ -451,7 +451,7 @@ def ai_key_state(user: User) -> dict[str, Any]:
     from . import aikeys
 
     cfg = get_settings()
-    if not cfg.auth_enabled:  # your own computer: the key in .env
+    if not cfg.auth_enabled or cfg.share_server_ai_key:  # your own computer, or the server's key is shared with everyone
         return {"mode": "server", "has_key": bool(cfg.gemini_api_key), "hint": None}
     hint = aikeys.hint(user.id) if aikeys.load(user.id) else None
     if hint:

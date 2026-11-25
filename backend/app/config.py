@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # --- accounts (off by default: local use needs no login) ----------------
     auth_enabled: bool = False  # True = invite-only accounts, per-user ownership and quotas
     auth_secret: str = ""  # signs media tokens; empty = a random one is created once in storage/.auth_secret
+    # accounts on only: True = EVERY account's AI runs on the server's GEMINI_API_KEY (you pay / your quota), and nobody
+    # needs a key of their own. False = each account brings its own key (admins fall back to the server's).
+    share_server_ai_key: bool = False
     ai_key_secret: str = ""  # encrypts the Gemini keys people save; empty = a random one is created once in storage/.ai_key_secret
     session_days: int = 14
     daily_video_limit: int = 3  # uploads per rolling 24 h for a normal user (admins: unlimited)

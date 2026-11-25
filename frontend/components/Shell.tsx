@@ -86,6 +86,14 @@ export default function Shell({ user, onSignOut, wide, section, children }: Prop
                   {left} of {v!.limit} video{v!.limit === 1 ? "" : "s"} left ·{" "}
                 </span>
               )}
+              {user.is_admin && (
+                <>
+                  <Link href="/admin" className="underline hover:text-white">
+                    Admin
+                  </Link>
+                  {" · "}
+                </>
+              )}
               <Link href="/settings" className="underline hover:text-white">
                 Settings
               </Link>

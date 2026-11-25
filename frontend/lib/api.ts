@@ -303,6 +303,26 @@ async function accountCall(method: string, body?: unknown): Promise<AiKeyState> 
 export const saveAiKey = (key: string) => accountCall("PUT", { key });
 export const removeAiKey = () => accountCall("DELETE");
 
+export type AdminAccount = {
+  id: number;
+  email: string;
+  is_admin: boolean;
+  disabled: boolean;
+  plan: string;
+  created_at: string;
+  videos_stored: number;
+  videos_24h: number;
+  chats_24h: number;
+};
+export type AdminOverview = { totals: { accounts: number; new_24h: number; new_7d: number }; users: AdminAccount[] };
+/** Every account (admins only; for anyone else the server answers "not found"). */
+export async function getAdminUsers(): Promise<AdminOverview> {
+  const res = await authedFetch("/api/admin/users");
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(errorMessage(data, `Request failed (HTTP ${res.status}).`));
+  return data as AdminOverview;
+}
+
 export const login = (email: string, password: string) => postAuth<Session>("/api/auth/login", { email, password });
 export const signup = (invite_code: string, email: string, password: string) =>
   postAuth<Session>("/api/auth/signup", { invite_code, email, password });

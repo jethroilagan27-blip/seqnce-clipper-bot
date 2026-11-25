@@ -70,7 +70,7 @@ class GeminiProvider:
                     raise AIError(
                         "Your Gemini key has used up its quota for now (the free tier has limits). Try again in a minute."
                         if self._own_key
-                        else "The AI service is rate-limited right now (free-tier quota). Try again in a minute."
+                        else "The AI service is rate-limited right now (free-tier quota). Try again in a few minutes, or tomorrow if today's limit is used up."
                     ) from exc
                 if code in (400, 401, 403):
                     raise AIError(

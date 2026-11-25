@@ -40,6 +40,11 @@ export default function MobileMenu({ user, onSignOut }: { user: AuthUser | null;
             <Link href="/settings" onClick={close} className={row}>
               Account settings <span aria-hidden="true">›</span>
             </Link>
+            {user?.is_admin && (
+              <Link href="/admin" onClick={close} className={row}>
+                Admin: all accounts <span aria-hidden="true">›</span>
+              </Link>
+            )}
           </nav>
 
           {user && onSignOut && (

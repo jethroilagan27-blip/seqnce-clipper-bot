@@ -373,6 +373,20 @@ def list_users() -> list[dict[str, Any]]:
         return [dict(r) for r in conn.execute("SELECT * FROM users ORDER BY id")]
 
 
+def user_overview(since: str) -> list[dict[str, Any]]:
+    """Every account, newest first, with what it has used since `since` (an ISO time). No password hashes, no keys."""
+    with connect() as conn:
+        rows = conn.execute(
+            """SELECT u.id, u.email, u.is_admin, u.disabled, u.plan, u.created_at,
+                      (SELECT COUNT(*) FROM jobs j WHERE j.user_id = u.id) AS videos_stored,
+                      (SELECT COUNT(*) FROM usage x WHERE x.user_id = u.id AND x.kind = 'video' AND x.created_at > ?) AS videos_recent,
+                      (SELECT COUNT(*) FROM usage x WHERE x.user_id = u.id AND x.kind = 'chat' AND x.created_at > ?) AS chats_recent
+               FROM users u ORDER BY u.created_at DESC, u.id DESC""",
+            (since, since),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 _USER_FIELDS = {"password_hash", "is_admin", "disabled", "video_limit", "chat_limit", "plan", "features_json"}
 
 

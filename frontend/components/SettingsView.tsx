@@ -85,18 +85,28 @@ export default function SettingsView({ account }: { account: AccountInfo }) {
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4 sm:p-5" aria-labelledby="ai-key-h">
           <div>
             <h3 id="ai-key-h" className="font-semibold">
-              Your Gemini API key
+              {ai?.mode === "own" ? "Your Gemini API key" : "AI"}
             </h3>
-            <p className="mt-1 text-sm text-white/55">
-              Seqnce&apos;s AI (the editing plan, the chat and Studio&apos;s assistant) runs on <strong className="text-white/80">your own</strong> free Google Gemini key, so
-              what you use is on your own quota.
-            </p>
+            {ai?.mode === "own" && (
+              <p className="mt-1 text-sm text-white/55">
+                Seqnce&apos;s AI (the editing plan, the chat and Studio&apos;s assistant) runs on <strong className="text-white/80">your own</strong> free Google Gemini key, so
+                what you use is on your own quota.
+              </p>
+            )}
           </div>
 
           {!user || ai?.mode === "server" ? (
-            <p className="rounded-lg border border-white/10 px-3 py-2 text-sm text-white/60">
-              {user ? "This account uses the server's AI key, so there is nothing to set up." : "This computer uses the key in the .env file, so there is nothing to set up here."}
-            </p>
+            <>
+              <p className="rounded-lg border border-white/10 px-3 py-2 text-sm text-white/60">
+                {user ? "The AI is provided by Seqnce, so there is nothing to set up." : "This computer uses the key in the .env file, so there is nothing to set up here."}
+              </p>
+              {user && (
+                <p className="text-xs text-white/40">
+                  What the AI works on (what is said in your video, a few frames, your file names and messages) is sent to Google&apos;s Gemini, which may use it to improve its
+                  products. Don&apos;t upload anything confidential.
+                </p>
+              )}
+            </>
           ) : (
             <>
               <p className={`rounded-lg border px-3 py-2 text-sm ${ai?.has_key ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100" : "border-amber-400/30 bg-amber-400/10 text-amber-100"}`}>
